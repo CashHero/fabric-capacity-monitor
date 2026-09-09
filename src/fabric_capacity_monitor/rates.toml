@@ -1,0 +1,48 @@
+# Microsoft Fabric consumption rates.
+#
+# Microsoft changes these at any time, which is why they live in data rather than code.
+# Override any value with `--config my.toml` containing a [rates] table of the same shape.
+
+[meta]
+as_of = "2026-09-09"
+
+[spark]
+# "Two Spark VCores ... equals one capacity unit (CU)."
+# https://learn.microsoft.com/en-us/fabric/enterprise/fabric-operations#spark
+vcores_per_cu = 2.0
+doc = "https://learn.microsoft.com/en-us/fabric/data-engineering/billing-capacity-management-for-spark"
+
+# vCores per node, by Fabric pool node size.
+# https://learn.microsoft.com/en-us/fabric/data-engineering/spark-compute
+[spark.node_vcores]
+Small = 4
+Medium = 8
+Large = 16
+XLarge = 32
+XXLarge = 64
+
+[pipeline]
+# "0.0056 CU hours for each non-copy activity run" -> 20.16 CU-seconds.
+# https://learn.microsoft.com/en-us/fabric/data-factory/pricing-pipelines
+orchestration_cu_hours_per_activity_run = 0.0056
+# "1.5 CU hours" per intelligent-optimization throughput resource, for Copy activities.
+data_movement_cu_per_second = 1.5
+doc = "https://learn.microsoft.com/en-us/fabric/data-factory/pricing-pipelines"
+
+[dataflow_gen2]
+# CI/CD dataflows use a two-tier rate on query duration; non-CI/CD is flat.
+# https://learn.microsoft.com/en-us/fabric/data-factory/pricing-dataflows-gen2
+cicd_first_tier_seconds = 600
+cicd_first_tier_cu_per_second = 12.0
+cicd_second_tier_cu_per_second = 1.5
+non_cicd_cu_per_second = 16.0
+high_scale_cu_per_second = 6.0
+doc = "https://learn.microsoft.com/en-us/fabric/data-factory/pricing-dataflows-gen2"
+
+[smoothing]
+# Fabric's smoothing quantum and throttling horizons.
+# https://learn.microsoft.com/en-us/fabric/enterprise/throttling
+window_seconds = 30
+background_windows = 2880        # 24 hours
+interactive_delay_windows = 20   # 10 minutes
+interactive_reject_windows = 120 # 60 minutes

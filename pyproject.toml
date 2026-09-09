@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fabric-capacity-monitor"
+version = "0.1.0"
+description = "Monitor Microsoft Fabric capacity usage from the command line, without a Power BI Pro licence."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "fabric-capacity-monitor contributors" }]
+keywords = ["microsoft-fabric", "capacity", "monitoring", "capacity-units", "spark"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+]
+dependencies = ["requests>=2.31"]
+
+[project.optional-dependencies]
+azure = ["azure-identity>=1.17"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+fabric-capacity-monitor = "fabric_capacity_monitor.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/OWNER/fabric-capacity-monitor"
+Issues = "https://github.com/OWNER/fabric-capacity-monitor/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fabric_capacity_monitor"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
