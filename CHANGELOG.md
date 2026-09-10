@@ -20,6 +20,7 @@ First release.
 - Text, JSON and self-contained HTML output.
 - Pipeline CU as a documented lower bound; unmeasurable workloads listed explicitly
   rather than silently dropped.
+- Requires Python 3.13 or newer.
 
 [Unreleased]: https://github.com/CashHero/fabric-capacity-monitor/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/CashHero/fabric-capacity-monitor/releases/tag/v0.1.0
