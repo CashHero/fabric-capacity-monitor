@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      contents: read    # a permissions block drops every default, checkout needs this back
       id-token: write   # required for trusted publishing
     steps:
       - uses: actions/checkout@v7
