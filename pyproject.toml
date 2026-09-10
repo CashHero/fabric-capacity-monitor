@@ -4,18 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fabric-capacity-monitor"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Monitor Microsoft Fabric capacity usage from the command line, without a Power BI Pro licence."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-authors = [{ name = "fabric-capacity-monitor contributors" }]
+authors = [{ name = "CashHero", email = "engineering@cashhero.ai" }]
 keywords = ["microsoft-fabric", "capacity", "monitoring", "capacity-units", "spark"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -31,11 +30,20 @@ dev = ["pytest>=8", "ruff>=0.6"]
 fabric-capacity-monitor = "fabric_capacity_monitor.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/OWNER/fabric-capacity-monitor"
-Issues = "https://github.com/OWNER/fabric-capacity-monitor/issues"
+Homepage = "https://github.com/CashHero/fabric-capacity-monitor"
+Repository = "https://github.com/CashHero/fabric-capacity-monitor"
+Issues = "https://github.com/CashHero/fabric-capacity-monitor/issues"
+Changelog = "https://github.com/CashHero/fabric-capacity-monitor/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "src/fabric_capacity_monitor/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fabric_capacity_monitor"]
+
+[tool.hatch.build.targets.sdist]
+# hatchling always ships .gitignore; the rest is agent/CI scaffolding.
+exclude = ["AGENTS.md", "CLAUDE.md", "/.github"]
 
 [tool.ruff]
 line-length = 110
