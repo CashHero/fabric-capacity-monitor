@@ -21,7 +21,7 @@ pip install fabric-capacity-monitor          # core
 pip install "fabric-capacity-monitor[azure]" # adds DefaultAzureCredential support
 ```
 
-Requires Python 3.11+.
+Requires Python 3.13+.
 
 ## Authentication
 
