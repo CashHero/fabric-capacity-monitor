@@ -7,7 +7,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 ```bash
 pip install -e ".[dev]"          # or ".[dev,azure]" for DefaultAzureCredential
-pytest -q                        # full suite (CI runs this on 3.11/3.12/3.13)
+pytest -q                        # full suite (CI runs this on 3.13)
 pytest tests/test_cu.py::test_spark_cu_for_a_real_session   # single test
 ruff check .                     # lint; CI fails on any finding
 ```
