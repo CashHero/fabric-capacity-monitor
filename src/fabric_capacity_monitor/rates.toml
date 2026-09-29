@@ -39,6 +39,13 @@ non_cicd_cu_per_second = 16.0
 high_scale_cu_per_second = 6.0
 doc = "https://learn.microsoft.com/en-us/fabric/data-factory/pricing-dataflows-gen2"
 
+[eventstream]
+# "Eventstream Per Hour ... Flat charge ... 0.222 capacity unit (CU) hours", charged while
+# events flowed in the past two hours. Data traffic and processors are billed on top.
+# https://learn.microsoft.com/en-us/fabric/real-time-intelligence/event-streams/monitor-capacity-consumption
+flat_cu_hours_per_hour = 0.222
+doc = "https://learn.microsoft.com/en-us/fabric/real-time-intelligence/event-streams/monitor-capacity-consumption"
+
 [smoothing]
 # Fabric's smoothing quantum and throttling horizons.
 # https://learn.microsoft.com/en-us/fabric/enterprise/throttling

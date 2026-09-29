@@ -63,7 +63,9 @@ These are the project's reason for existing — tests enforce most of them.
 - **Exact vs estimated is never blurred.** Only Spark is `EXACT` (published rate:
   2 vCores = 1 CU, billed for the session's whole lifetime). Everything else is
   `ESTIMATED` and every renderer must mark it (`est` / `~`). Pipeline CU is explicitly a
-  *lower bound* — activity counts aren't exposed by any public API.
+  *lower bound* — activity counts aren't exposed by any public API. Dataflow Gen2 CU
+  (including pipeline-triggered refreshes) prices each job instance's wall-clock as one
+  CI/CD query, so multi-query refreshes come out low; High Scale and Fast Copy are omitted.
 - **High concurrency is labelled, not guessed.** Fabric reports one session per stage,
   named after the notebook that opened it; joiners leave no record. When
   `Collection.high_concurrency_present`, the breakdown must say "by Spark session
@@ -71,8 +73,9 @@ These are the project's reason for existing — tests enforce most of them.
   sanctioned way to redistribute, and it divides pro rata so the capacity total is
   preserved exactly; an unknown session or a raising resolver leaves the operation intact.
 - **Unmeasurable workloads are listed, not dropped.** OneLake, SQL endpoint, semantic
-  models, Eventhouse and pipeline-triggered Dataflow Gen2 go into
-  `Collection.unaccounted` with the reason.
+  models, Eventhouse and running Eventstreams go into `Collection.unaccounted` with the
+  reason. An Eventstream's flat charge stays out of the timeline: it bills only while
+  events flowed in the past two hours, which the topology API doesn't say.
 - **Read-only, viewer-level.** Every endpoint used must work for a workspace viewer with
   no Power BI licence and no capacity-admin role. Nothing writes to Fabric or Azure.
 - **ARM is strictly optional.** No SKU, cost, or pause/resume history without it, but the

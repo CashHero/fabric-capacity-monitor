@@ -64,6 +64,12 @@ class Rates:
     def dataflow(self) -> dict[str, Any]:
         return self.raw["dataflow_gen2"]
 
+    # -- Eventstream ---------------------------------------------------------
+    @property
+    def eventstream_flat_cu(self) -> float:
+        """CU an active Eventstream draws from its flat hourly charge alone."""
+        return float(self.raw["eventstream"]["flat_cu_hours_per_hour"])
+
     # -- Smoothing -----------------------------------------------------------
     @property
     def window_seconds(self) -> int:
