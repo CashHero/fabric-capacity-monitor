@@ -159,6 +159,10 @@ vcores_per_cu = 2.0   # override if Microsoft changes a rate before this package
 `0` healthy · `1` a throttling threshold was crossed · `2` configuration or auth failure.
 Suitable for CI.
 
+If the capacity was resized during the range, "crossed" means the range's load would cross
+a threshold on the *current* SKU. The throttling counts in the report still show what
+happened against the SKU in effect at the time.
+
 ## Licence
 
 MIT.

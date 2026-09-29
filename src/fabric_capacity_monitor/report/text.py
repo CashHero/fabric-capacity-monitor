@@ -72,6 +72,20 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
     lines.append(f"    Interactive rejection  {breaches['interactive_rejection']:>6}   (forward 60 min)")
     lines.append(f"    Background rejection   {breaches['background_rejection']:>6}   (forward 24 h)")
     lines.append(f"    Over 100% in-window    {breaches['over_capacity']:>6}")
+    if analysis.sku_changes:
+        crossed = [
+            f"{analysis.current_breaches[key]} {label}"
+            for key, label in (
+                ("interactive_delay", "interactive delay"),
+                ("interactive_rejection", "interactive rejection"),
+                ("background_rejection", "background rejection"),
+            )
+            if analysis.current_breaches[key]
+        ]
+        lines.append(
+            f"    The same load on {capacity.sku} throughout would cross: "
+            f"{', '.join(crossed) or 'none'}"
+        )
     lines.append("")
 
     if analysis.windows:
@@ -153,15 +167,18 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
                 lines.append(("    - " if index == 0 else "      ") + chunk)
         lines.append("")
 
-    worst = max(
-        breaches["interactive_delay"],
-        breaches["interactive_rejection"],
-        breaches["background_rejection"],
-    )
-    verdict = "THROTTLING RISK" if worst else "healthy"
+    verdict = "THROTTLING RISK" if analysis.at_risk else "healthy"
     lines.append(_rule())
-    peak = _pct(analysis.peak_utilization).strip()
-    lines.append(f"SUMMARY: {verdict} · peak {peak} of {analysis.peak_sku or '?'}")
+    if analysis.sku_changes:
+        current = _pct(analysis.current_peak_utilization).strip()
+        peak = _pct(analysis.peak_utilization).strip()
+        lines.append(
+            f"SUMMARY: {verdict} on {capacity.sku} · peak {current} of {capacity.sku}"
+            f" ({peak} of {analysis.peak_sku} before resize)"
+        )
+    else:
+        peak = _pct(analysis.peak_utilization).strip()
+        lines.append(f"SUMMARY: {verdict} · peak {peak} of {capacity.sku or '?'}")
     lines.append(_rule())
     return "\n".join(lines)
 

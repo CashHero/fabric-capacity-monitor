@@ -64,7 +64,11 @@ class Analysis:
     days: list[DayRow]
     items: list[ItemRow]
     workspaces: list[ItemRow]
-    breaches: dict[str, int]
+    breaches: dict[str, int]  # as it happened, against the SKU in effect at the time
+    # The same load against the current SKU throughout: the risk as the capacity stands.
+    # Identical to `breaches` / `peak_utilization` unless the capacity was resized.
+    current_breaches: dict[str, int]
+    current_peak_utilization: float | None
     total_cu_seconds: float
     total_operations: int
     users: set[str]
@@ -94,6 +98,14 @@ class Analysis:
         if not self.windows:
             return None
         return max(self.windows, key=lambda w: w.utilization)
+
+    @property
+    def at_risk(self) -> bool:
+        """Whether this load crosses a throttling threshold on the capacity as sized now."""
+        return any(
+            self.current_breaches[key]
+            for key in ("interactive_delay", "interactive_rejection", "background_rejection")
+        )
 
     @property
     def peak_sku(self) -> str | None:
@@ -173,6 +185,9 @@ def analyse(
         if capacity.base_cu
         else []
     )
+    current = windows
+    if capacity.base_cu and any(c.at > start for c in capacity.sku_changes):
+        current = build_timeline(smoothed, start, end, capacity.base_cu, rates)
 
     days_map: dict[str, DayRow] = {}
     for operation in operations:
@@ -220,6 +235,8 @@ def analyse(
         items=_rows(item_groups, prior_cu),
         workspaces=_rows(ws_groups, ws_prior),
         breaches=throttle_breaches(windows),
+        current_breaches=throttle_breaches(current),
+        current_peak_utilization=max((w.utilization for w in current), default=None),
         total_cu_seconds=sum(op.cu_seconds for op in operations),
         total_operations=len(operations),
         users={op.user for op in operations if op.user},

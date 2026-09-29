@@ -170,5 +170,27 @@ def test_a_resize_is_not_applied_to_the_time_before_it(rates):
 
     out = text_report.render(analysis)
     assert "Resized               F4 → F8 at 2026-09-01 12:00 UTC" in out
-    assert "peak" in out and "of F4" in out.splitlines()[-2]
+    assert "of F4 before resize" in out.splitlines()[-2]
     assert "F4 → F8" in html_report.render(analysis)
+
+
+def test_verdict_judges_the_load_against_the_current_sku(rates):
+    # 1.5x an F4 all day: throttled while it was an F4, comfortable on today's F8.
+    collection = Collection(capacity=_resized_capacity())
+    collection.operations = [_op("ingest", 180.0 * rates.background_windows, START)]
+    analysis = analyse(collection, rates, START, END)
+
+    assert analysis.breaches["background_rejection"] > 0  # history is kept
+    assert not analysis.at_risk
+    assert analysis.current_peak_utilization == pytest.approx(0.75)
+    summary = text_report.render(analysis).splitlines()[-2]
+    assert summary.startswith("SUMMARY: healthy on F8 · peak 75.0% of F8")
+    assert json.loads(json_out.render(analysis))["summary"]["at_risk"] is False
+
+
+def test_verdict_still_flags_a_load_the_current_sku_cannot_carry(rates):
+    collection = Collection(capacity=_resized_capacity())
+    collection.operations = [_op("ingest", 400.0 * rates.background_windows, START)]
+    analysis = analyse(collection, rates, START, END)
+    assert analysis.at_risk
+    assert "THROTTLING RISK on F8" in text_report.render(analysis)

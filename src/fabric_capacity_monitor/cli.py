@@ -233,11 +233,7 @@ def cmd_report(args: argparse.Namespace, fabric: FabricClient, arm: ArmClient, r
         )
         print(f"JSON written to {args.json}", file=sys.stderr)
 
-    risky = any(
-        analysis.breaches[key]
-        for key in ("interactive_delay", "interactive_rejection", "background_rejection")
-    )
-    return 1 if risky else 0
+    return 1 if analysis.at_risk else 0
 
 
 def main(argv: list[str] | None = None) -> int:

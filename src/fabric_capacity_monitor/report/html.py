@@ -244,6 +244,12 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
         ("Users", str(len(analysis.users)), ""),
         ("Throttled windows", str(max(breaches.values())), "bad" if risky else "good"),
     ]
+    if analysis.sku_changes:
+        cards.append((
+            f"Peak on {capacity.sku} throughout",
+            _pct(analysis.current_peak_utilization),
+            "bad" if analysis.at_risk else "good",
+        ))
     card_html = "".join(
         f'<div class="card {css}"><div class="label">{_e(label)}</div>'
         f'<div class="value">{_e(value)}</div></div>'
