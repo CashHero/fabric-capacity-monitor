@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Dataflow Gen2 refreshes are now priced (estimated) from their job-instance run history,
-  including refreshes triggered from a pipeline.
+  including refreshes triggered from a pipeline. Each run is priced as one CI/CD query, so
+  multi-query refreshes come out low.
 - Running Eventstreams are listed under *not counted* with their flat hourly charge, so an
   always-on stream is visible even though its CU can't be measured.
 

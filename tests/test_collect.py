@@ -168,7 +168,9 @@ def test_running_eventstream_is_listed_as_unaccounted(rates, capacity):
     [entry] = [e for e in result.unaccounted if "Eventstream" in e and "Monitoring" in e]
     assert "analytics" in entry
     assert "running" in entry
-    assert "F4" in entry
+    # 0.222 CU flat against an F4's 4 CU base.
+    assert "flat 0.222 CU, ~6% of this F4" in entry
+    assert not any("topology" in w for w in result.warnings)
 
 
 def test_stopped_eventstream_is_not_listed(rates, capacity):
@@ -179,3 +181,14 @@ def test_stopped_eventstream_is_not_listed(rates, capacity):
         datetime(2026, 8, 1, tzinfo=UTC),
     )
     assert not any("Monitoring_Eventstream" in entry for entry in result.unaccounted)
+
+
+def test_unreadable_eventstream_topology_is_warned(rates, capacity):
+    # A 403 or other FabricError comes back as {}; it must not look like a paused stream.
+    items = [{"id": "e1", "type": "Eventstream", "displayName": "Monitoring_Eventstream"}]
+    result = collect(
+        StubClient([], items), capacity, rates, datetime(2026, 8, 1, tzinfo=UTC)
+    )
+    assert not any("Monitoring_Eventstream" in entry for entry in result.unaccounted)
+    [warning] = [w for w in result.warnings if "topology" in w]
+    assert "'Monitoring_Eventstream' (analytics)" in warning

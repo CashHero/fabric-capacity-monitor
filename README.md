@@ -56,8 +56,11 @@ API documents are not currently populated.
 Pipeline orchestration is charged per activity run and no public API exposes activity
 counts, so pipeline CU is reported as a lower bound. Dataflow Gen2 refreshes — including
 those a pipeline triggers — are priced from each run's wall-clock duration at the CI/CD
-query-evaluation rate; per-query durations and High Scale staging compute aren't exposed,
-so that figure can land either side of the true charge. Rates live in
+query-evaluation rate, as a single query on one tier schedule. Fabric bills every mashup
+query on its own schedule (each gets its own expensive first ten minutes) and adds High
+Scale staging and Fast Copy compute; none of that is exposed, so a multi-query refresh
+comes out low. The figure only runs high when a run idles around a short evaluation.
+Rates live in
 [`rates.toml`](src/fabric_capacity_monitor/rates.toml), each with a documentation link and
 an "as of" date, and any of them can be overridden in your config file.
 

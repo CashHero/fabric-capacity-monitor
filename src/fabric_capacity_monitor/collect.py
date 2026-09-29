@@ -159,9 +159,11 @@ def collect_dataflows(
 ) -> None:
     """Dataflow Gen2 refreshes, including those a pipeline triggers.
 
-    Priced from each run's wall-clock duration at the CI/CD query-evaluation rate. Fabric
-    bills per query evaluation and for High Scale staging compute, neither of which a
-    public API exposes, so the figure can land either side of the true charge.
+    Priced from each run's wall-clock duration at the CI/CD query-evaluation rate, as if
+    the run were a single query. Fabric bills each mashup query on its own tier schedule
+    (its own expensive first ten minutes) plus High Scale staging and Fast Copy, none of
+    which a public API exposes. A multi-query refresh therefore comes out low; the figure
+    only runs high when the job instance idles around a short evaluation.
     """
     charged = False
     for workspace in capacity.workspaces:
@@ -193,13 +195,15 @@ def collect_dataflows(
                         cu_seconds=dataflow_cu_seconds(span, rates),
                         utilization_type=BACKGROUND,
                         job_instance_id=run.get("id"),
-                        note="estimated from run wall-clock at the CI/CD rate",
+                        note="usually low: run wall-clock priced as one CI/CD query",
                     )
                 )
     if charged:
         collection.warnings.append(
             "Dataflow Gen2 CU is estimated from each run's wall-clock duration at the CI/CD "
-            "rate — per-query durations and High Scale staging compute are not exposed."
+            "rate, with one tier schedule per run. Fabric bills each query separately and "
+            "adds High Scale staging and Fast Copy, none of which the API exposes, so "
+            "multi-query refreshes come out low."
         )
 
 
@@ -212,6 +216,7 @@ def collect_eventstreams(
     """List running Eventstreams: they bill continuously and no free API exposes the CU."""
     flat = rates.eventstream_flat_cu
     share = f", ~{flat / capacity.base_cu:.0%} of this {capacity.sku}" if capacity.base_cu else ""
+    unreadable = []
     for workspace in capacity.workspaces:
         ws_id = workspace["id"]
         ws_name = workspace.get("displayName", ws_id)
@@ -224,12 +229,19 @@ def collect_eventstreams(
                 for part in ("sources", "operators", "streams", "destinations")
                 for node in topology.get(part) or []
             ]
-            if any(node.get("status") == "Running" for node in nodes):
+            if not nodes:
+                unreadable.append(f"'{item.get('displayName', item['id'])}' ({ws_name})")
+            elif any(node.get("status") == "Running" for node in nodes):
                 collection.unaccounted.append(
                     f"Eventstream '{item.get('displayName', item['id'])}' ({ws_name}) is "
                     f"running — while events flow it bills a flat {flat} CU{share}, plus data "
                     "traffic and the uptime of any Eventhouse it feeds."
                 )
+    if unreadable:
+        collection.warnings.append(
+            f"Could not read the topology of Eventstream(s) {', '.join(unreadable)}; if any "
+            "is running, its flat charge is missing from the not-counted list."
+        )
 
 
 def collect(
