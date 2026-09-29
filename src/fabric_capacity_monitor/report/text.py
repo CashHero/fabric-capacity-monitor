@@ -36,6 +36,27 @@ def _sparkline(values: list[float], width: int = 60) -> str:
     return "".join(out)
 
 
+def _resize_markers(analysis: Analysis, width: int = 60) -> str:
+    """A line to sit under the sparkline with a '^' where each resize happened."""
+    windows = analysis.windows
+    if not analysis.sku_changes or not windows:
+        return ""
+    step = max(len(windows) / width, 1.0)
+    cells = [" "] * min(width, len(windows))
+    for change in analysis.sku_changes:
+        index = int((change.at - windows[0].start).total_seconds() // analysis.rates.window_seconds)
+        bucket = int(index / step)
+        if int((bucket + 1) * step) <= index:  # float rounding: match _sparkline's slicing
+            bucket += 1
+        cells[min(max(bucket, 0), len(cells) - 1)] = "^"
+    line = "".join(cells).rstrip()
+    label = ", ".join(f"{c.previous}→{c.new}" for c in analysis.sku_changes)
+    first = line.index("^")
+    if len(line) + 1 + len(label) > width and first > len(label):
+        return f"{line[: first - len(label) - 1]}{label} {line[first:]}"
+    return f"{line} {label}"
+
+
 def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = False, top: int = 15) -> str:
     capacity = analysis.capacity
     budget = capacity.daily_budget_cu_seconds()
@@ -54,6 +75,11 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
 
     lines.append(f"  Average utilization   {_pct(analysis.average_utilization)}   (active windows only)")
     lines.append(f"  Peak utilization      {_pct(analysis.peak_utilization)}")
+    if analysis.windows:
+        lines.append(
+            f"  Current utilization   {_pct(analysis.windows[-1].utilization)}"
+            f"   (latest window, {capacity.sku or '?'})"
+        )
     if budget:
         lines.append(f"  Daily CU budget       {_num(budget)} CU-s  ({capacity.base_cu:g} CU)")
     for change in analysis.sku_changes:
@@ -91,6 +117,8 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
     if analysis.windows:
         lines.append("  Utilization over time (peak per bucket, '!' = over budget)")
         lines.append(f"    {_sparkline([w.utilization for w in analysis.windows])}")
+        if markers := _resize_markers(analysis):
+            lines.append(f"    {markers}")
         lines.append(
             f"    {analysis.start:%m-%d}"
             + " " * 52

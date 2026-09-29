@@ -171,6 +171,11 @@ def test_a_resize_is_not_applied_to_the_time_before_it(rates):
     out = text_report.render(analysis)
     assert "Resized               F4 → F8 at 2026-09-01 12:00 UTC" in out
     assert "of F4 before resize" in out.splitlines()[-2]
+    assert "Current utilization" in out
+    # The resize is a quarter of the way through a 2-day range: sparkline bucket 15 of 60.
+    marker = next(line for line in out.splitlines() if "^" in line)
+    assert marker.strip() == "^ F4→F8"
+    assert marker.index("^") - 4 == 15
     assert "F4 → F8" in html_report.render(analysis)
 
 
@@ -194,3 +199,14 @@ def test_verdict_still_flags_a_load_the_current_sku_cannot_carry(rates):
     analysis = analyse(collection, rates, START, END)
     assert analysis.at_risk
     assert "THROTTLING RISK on F8" in text_report.render(analysis)
+
+
+def test_a_resize_near_the_end_puts_its_label_left_of_the_marker(rates):
+    capacity = _resized_capacity()
+    capacity.sku_changes[0].at = END - timedelta(minutes=30)
+    collection = Collection(capacity=capacity)
+    collection.operations = [_op("ingest", 1000.0, START)]
+    out = text_report.render(analyse(collection, rates, START, END))
+    marker = next(line for line in out.splitlines() if "^" in line)
+    assert marker.rstrip().endswith("F4→F8 ^")
+    assert marker.index("^") - 4 == 59

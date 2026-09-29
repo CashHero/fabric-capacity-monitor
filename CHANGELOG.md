@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resize, and the dashboard's SKU card shows it (e.g. `F4 → F8`). After a resize, the
   verdict and exit code judge the range's load against the current SKU, so throttling
   that a resize has already fixed no longer fails the run.
+- The text report shows the latest window's utilization, and marks resizes under the
+  utilization sparkline. A recent resize otherwise disappears into the chart's final
+  bucket, which shows the peak across several hours.
 - The utilization timeline now includes background CU carried in from runs that ended
   up to 24 hours before the reporting range. Previously the first day of every report
   started from zero, understating early utilization, peaks and the average.
