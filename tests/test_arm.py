@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import requests
+
 from fabric_capacity_monitor.arm import ArmClient
 from fabric_capacity_monitor.model import SkuChange
 
@@ -47,3 +49,21 @@ def test_sku_changes_are_parsed_oldest_first():
 
 def test_sku_changes_degrade_to_empty_without_access():
     assert _client(_Response(403)).sku_changes(RESOURCE_ID) == []
+
+
+def _unreachable():
+    def fail(*args, **kwargs):
+        raise requests.ConnectionError("down")
+
+    client = ArmClient(_Tokens())
+    client._session.get = fail
+    client._session.post = fail
+    return client
+
+
+def test_network_failures_degrade_to_empty_rather_than_raising():
+    client = _unreachable()
+    assert client.capacities() == []
+    assert client.activity_log(RESOURCE_ID, "2026-09-01T00:00:00Z") == []
+    assert client.sku_changes(RESOURCE_ID) == []
+    assert client.cost_by_meter("sub", "2026-09-01", "2026-09-02") is None

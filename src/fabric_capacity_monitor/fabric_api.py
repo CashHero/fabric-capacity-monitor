@@ -24,6 +24,14 @@ class FabricError(RuntimeError):
     pass
 
 
+class FabricUnreachable(RuntimeError):
+    """The API could not be reached, even after retrying.
+
+    Deliberately not a ``FabricError``: endpoints that treat a refused request as "no
+    data" must not treat an outage the same way and silently drop a workspace's CU.
+    """
+
+
 class FabricClient:
     def __init__(self, tokens: TokenProvider, *, timeout: float = 60.0) -> None:
         self._tokens = tokens
@@ -35,9 +43,15 @@ class FabricClient:
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             headers = {"Authorization": f"Bearer {self._tokens.token(FABRIC_RESOURCE)}"}
             headers.update(kwargs.pop("headers", {}))
-            response = self._session.request(
-                method, url, headers=headers, timeout=self._timeout, **kwargs
-            )
+            try:
+                response = self._session.request(
+                    method, url, headers=headers, timeout=self._timeout, **kwargs
+                )
+            except requests.RequestException as exc:
+                if attempt == _MAX_ATTEMPTS:
+                    raise FabricUnreachable(f"{method} {url}: {exc}") from exc
+                time.sleep(2**attempt)
+                continue
             if response.status_code in _RETRY_STATUS and attempt < _MAX_ATTEMPTS:
                 wait = float(response.headers.get("Retry-After", 2**attempt))
                 time.sleep(min(wait, 30.0))

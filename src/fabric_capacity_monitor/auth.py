@@ -94,16 +94,19 @@ class TokenProvider:
         ]
         if missing:
             raise AuthError(f"--auth env needs {', '.join(missing)} in the environment")
-        response = requests.post(
-            f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": client,
-                "client_secret": secret,
-                "scope": f"{resource}/.default",
-            },
-            timeout=30,
-        )
+        try:
+            response = requests.post(
+                f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": client,
+                    "client_secret": secret,
+                    "scope": f"{resource}/.default",
+                },
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise AuthError(f"client-credentials token request failed: {exc}") from exc
         if response.status_code != 200:
             raise AuthError(f"client-credentials token request failed: HTTP {response.status_code}")
         payload = response.json()
