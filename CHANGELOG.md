@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The utilization timeline now includes background CU carried in from runs that ended
+  up to 24 hours before the reporting range. Previously the first day of every report
+  started from zero, understating early utilization, peaks and the average.
+
 ## [0.1.0] - 2026-09-10
 
 First release.

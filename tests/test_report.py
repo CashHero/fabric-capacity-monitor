@@ -114,3 +114,18 @@ def test_average_utilization_ignores_idle_windows(analysis):
     # An idle overnight must not make the capacity look healthier than it is.
     assert analysis.average_utilization is not None
     assert analysis.average_utilization > 0
+
+
+def test_timeline_includes_carry_in_from_before_the_range(rates):
+    # A run that ended 12h before the range is still being smoothed into its first
+    # 12h of windows, but it is not part of the range's totals.
+    capacity = Capacity(id="c", name="demo", sku="F4",
+                        workspaces=[{"id": "w", "displayName": "analytics"}])
+    collection = Collection(capacity=capacity)
+    collection.operations = [_op("overnight", 2880.0, START - timedelta(hours=12))]
+    analysis = analyse(collection, rates, START, END)
+    assert analysis.windows[0].background_cu_seconds == pytest.approx(1.0)
+    assert analysis.windows[1439].background_cu_seconds == pytest.approx(1.0)
+    assert analysis.windows[1440].background_cu_seconds == pytest.approx(0.0)
+    assert analysis.total_cu_seconds == 0
+    assert analysis.days == []
