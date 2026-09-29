@@ -1,6 +1,7 @@
 """Renderers: they must run, and must not overstate what they know."""
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -251,15 +252,101 @@ def test_idle_capacity_is_already_below_target_with_full_headroom(analysis, rate
     assert "already below" in text_report.render(analysis)
 
 
-def test_peak_drivers_add_up_to_the_peak_and_keep_estimates_marked(analysis):
-    points = [row.cu_seconds / analysis.peak_window.budget_cu_seconds
-              for row in analysis.peak_drivers]
-    assert sum(points) == pytest.approx(analysis.peak_utilization)
-    assert analysis.peak_drivers[0].item_name == "transform"
-    pipeline = next(r for r in analysis.peak_drivers if r.item_name == "pipeline")
-    assert pipeline.exactness == "estimated"
-    driver_line = next(
-        line for line in text_report.render(analysis).splitlines()
-        if "pipeline" in line
-    )
-    assert "~" in driver_line
+def _f4(rates, operations):
+    capacity = Capacity(id="c", name="demo", sku="F4",
+                        workspaces=[{"id": "w", "displayName": "analytics"}])
+    collection = Collection(capacity=capacity)
+    collection.operations = operations
+    return analyse(collection, rates, START, END)
+
+
+def test_outlook_drivers_add_up_to_the_committed_load_and_keep_estimates_marked(rates):
+    analysis = _f4(rates, [
+        _op("nightly", 96.0 * rates.background_windows, END - timedelta(hours=20)),
+        _op("pipeline", 12.0 * rates.background_windows, END - timedelta(hours=1),
+            exactness=ESTIMATED),
+        _op("old", 999_999.0, START),  # spread finished before the outlook starts
+    ])
+    assert [row.item_name for row in analysis.outlook_drivers] == ["nightly", "pipeline"]
+    payload = json.loads(json_out.render(analysis))
+    shares = [row["utilization"] for row in payload["outlook_drivers"]]
+    assert shares == pytest.approx([0.8, 0.1])
+    assert sum(shares) == pytest.approx(payload["outlook"]["utilization_now"])
+
+    out = text_report.render(analysis)
+    assert "Committed load now, 90.0% of F4, made up of" in out
+    driver_line = next(line for line in out.splitlines() if "pipeline" in line)
+    assert driver_line.split()[:2] == ["pipeline", "~"]
+    assert "~ = estimated, not measured" in out  # legend without --by-item
+
+
+def test_headroom_is_the_spare_share_of_the_next_24_hours(rates):
+    # 40% of an F4 committed now: 60% of every window in the next 24 h is spare.
+    analysis = _f4(rates, [_op("hourly", 48.0 * rates.background_windows,
+                                END - timedelta(hours=2))])
+    assert analysis.headroom_cu_seconds == pytest.approx(0.6 * 120.0 * rates.background_windows)
+
+
+def test_outlook_drivers_show_five_and_sum_the_rest(rates):
+    analysis = _f4(rates, [
+        _op(f"job{i}", (10.0 + i) * rates.background_windows, END - timedelta(hours=1))
+        for i in range(7)
+    ])
+    assert len(analysis.outlook_drivers) == 7
+    assert len(json.loads(json_out.render(analysis))["outlook_drivers"]) == 7
+
+    out = text_report.render(analysis)
+    lines = out.splitlines()
+    first = next(i for i, line in enumerate(lines) if line.startswith("  Committed load now"))
+    rows = lines[first + 1 : first + 7]
+    assert [row.split()[0] for row in rows[:5]] == ["job6", "job5", "job4", "job3", "job2"]
+    assert rows[5].split()[:3] == ["2", "more", "items"]
+    points = [float(row.split()[-2]) for row in rows]
+    assert sum(points) == pytest.approx(analysis.outlook[0].utilization * 100, abs=0.1)
+    assert "2 more items" in html_report.render(analysis)
+
+
+def test_outlook_drivers_say_session_opener_under_high_concurrency(rates):
+    analysis = _f4(rates, [
+        replace(_op("opener", 48.0 * rates.background_windows, END - timedelta(hours=1)),
+                is_high_concurrency=True),
+    ])
+    out = text_report.render(analysis)
+    lines = out.splitlines()
+    first = next(i for i, line in enumerate(lines) if line.startswith("  Committed load now"))
+    assert "attributed to the notebook that OPENED it" in lines[first + 1]
+    page = html_report.render(analysis)
+    drivers = page[page.index("holding utilization up"):]
+    assert "attributed to the notebook that opened it" in drivers
+
+
+def test_a_long_estimated_name_keeps_its_mark(rates):
+    name = "a_very_long_dataflow_name_that_goes_on_and_on"
+    analysis = _f4(rates, [
+        _op(name, 12.0 * rates.background_windows, END - timedelta(hours=1),
+            exactness=ESTIMATED),
+    ])
+    out = text_report.render(analysis, by_item=True)
+    marked = [line for line in out.splitlines() if name[:30] in line]
+    assert len(marked) == 2  # the outlook drivers and the by-item table
+    for line in marked:
+        assert " ~ " in line
+
+
+def test_outlook_chart_shades_only_above_100_percent():
+    chart = html_report._area_chart([0.8] * 10, target=0.5)
+    assert 'class="over"' not in chart
+    assert 'class="target"' in chart
+    assert 'class="limit"' in chart
+    assert 'class="over"' in html_report._area_chart([1.2] * 10, target=0.5)
+
+
+def test_outlook_that_never_reaches_the_target_still_renders(rates):
+    analysis = _f4(rates, [_op("flat", 96.0 * rates.background_windows,
+                               END - timedelta(hours=1))])
+    analysis = replace(analysis, outlook=analysis.outlook[:100])
+    assert analysis.recovery_at is None
+    assert analysis.hold_off_seconds is None
+    assert "still above the target after 24 h" in text_report.render(analysis)
+    assert "not within 24 h" in html_report.render(analysis)
+    assert json.loads(json_out.render(analysis))["outlook"]["recovery_at"] is None

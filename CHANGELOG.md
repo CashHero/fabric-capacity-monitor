@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An outlook for the next 24 hours if nothing new runs, built from background CU that is
   already charged. It shows when utilization drops below a target (`--target`, default
   50%), how much background CU could be charged now without starting a throttle, and which
-  items made up the peak window. It appears in the text report, the HTML dashboard
-  (with a projected chart) and the JSON (`outlook`, `peak_drivers`).
+  items make up the load committed now. It appears in the text report, the HTML dashboard
+  (with a projected chart) and the JSON (`outlook`, `outlook_drivers`).
 - Dataflow Gen2 refreshes are now priced (estimated) from their job-instance run history,
   including refreshes triggered from a pipeline. Each run is priced as one CI/CD query, so
   multi-query refreshes come out low.

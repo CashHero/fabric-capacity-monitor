@@ -77,8 +77,9 @@ class Analysis:
     target: float = 0.5  # utilization the outlook counts down to
     # The next 24 h on the current SKU if nothing new runs: background CU already charged.
     outlook: list[Window] = field(default_factory=list)
-    # What made up the peak window, per item; cu_seconds is the share of that window only.
-    peak_drivers: list[ItemRow] = field(default_factory=list)
+    # What makes up the outlook's first window (the load committed now), per item, largest
+    # first; cu_seconds is the share of that window only.
+    outlook_drivers: list[ItemRow] = field(default_factory=list)
 
     @property
     def capacity(self):
@@ -128,7 +129,8 @@ class Analysis:
         """When committed load first drops below ``target`` if nothing new runs.
 
         Committed background CU only ever tails off, so the first window under the target
-        stays under it. The outlook's first window means it is already below.
+        stays under it. The outlook's first window means it is already below; None means it
+        never drops below within the outlook.
         """
         return next((w.start for w in self.outlook if w.utilization < self.target), None)
 
@@ -196,21 +198,17 @@ def _budget(capacity: Capacity, lo: datetime, hi: datetime) -> float | None:
     return total
 
 
-def _peak_drivers(operations: list[Operation], windows: list[Window], rates: Rates,
-                  top: int = 5) -> list[ItemRow]:
-    """Per-item CU-s in the peak window, largest first."""
-    if not windows:
-        return []
-    peak = max(windows, key=lambda w: w.utilization)
+def _drivers(operations: list[Operation], window: Window, rates: Rates) -> list[ItemRow]:
+    """Per-item CU-s in ``window``, largest first."""
     rows: dict[tuple, ItemRow] = {}
-    for operation, cu in window_contributions(operations, peak.start, rates):
+    for operation, cu in window_contributions(operations, window.start, rates):
         key = (operation.workspace_name, operation.item_kind, operation.item_name)
         row = rows.setdefault(key, ItemRow(*key))
         row.cu_seconds += cu
         row.operations += 1
         if operation.exactness != "exact":
             row.exactness = "estimated"
-    return sorted(rows.values(), key=lambda r: -r.cu_seconds)[:top]
+    return sorted(rows.values(), key=lambda r: -r.cu_seconds)
 
 
 def analyse(
@@ -243,6 +241,8 @@ def analyse(
     current = windows
     if capacity.base_cu and any(c.at > start for c in capacity.sku_changes):
         current = build_timeline(smoothed, start, end, capacity.base_cu, rates)
+    # build_timeline includes both ends, so this is one window longer than 24 h. That last
+    # window is past every spread and always empty, so any target above 0 is reached.
     horizon = timedelta(seconds=rates.background_windows * rates.window_seconds)
     outlook = (
         build_timeline(smoothed, end, end + horizon, capacity.base_cu, rates)
@@ -305,5 +305,5 @@ def analyse(
         activity_events=activity_events or [],
         target=target,
         outlook=outlook,
-        peak_drivers=_peak_drivers(smoothed, windows, rates),
+        outlook_drivers=_drivers(smoothed, outlook[0], rates) if outlook else [],
     )

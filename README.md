@@ -88,9 +88,9 @@ new runs, and shows three things:
 - **Headroom now**: how many CU-seconds of background work could be charged right now
   without starting any throttle. A job is charged when it *ends*, by which point the
   committed load has fallen further, so this figure is conservative.
-- **What made up the peak**: the runs smoothed into the busiest window, per item, in
-  percentage points of utilization. These are the runs to reschedule or spread out to
-  flatten the next peak.
+- **What's holding it up**: runs from the past 24 hours whose background CU is still
+  spreading into now, per item, in percentage points of utilization. These set the recovery
+  time and headroom above.
 
 The projection only counts what the report can see. Spark sessions still running, and
 workloads listed as *not counted*, add more load. So the true recovery time can be later

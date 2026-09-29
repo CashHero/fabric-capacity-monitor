@@ -47,8 +47,13 @@ def _downsample(values: list[float], buckets: int) -> list[float]:
     ]
 
 
-def _area_chart(values: list[float], *, threshold: float = 1.0, title: str = "") -> str:
-    """Filled area chart scaled so the 100% threshold always sits on the grid."""
+def _area_chart(
+    values: list[float], *, threshold: float = 1.0, target: float | None = None, title: str = ""
+) -> str:
+    """Filled area chart scaled so the 100% threshold always sits on the grid.
+
+    ``target``, if given, is drawn as a second, labelled line that is not a throttle.
+    """
     points = _downsample(values, _CHART_W - _PAD_L)
     if not points:
         return '<p class="empty">No data in range.</p>'
@@ -66,6 +71,13 @@ def _area_chart(values: list[float], *, threshold: float = 1.0, title: str = "")
         if v > threshold
     ]
     grid = []
+    if target is not None:
+        grid.append(
+            f'<line x1="{_PAD_L}" y1="{y(target):.1f}" x2="{_CHART_W}" '
+            f'y2="{y(target):.1f}" class="target"/>'
+            f'<text x="{_CHART_W - 4}" y="{y(target) - 4:.1f}" class="ylab">'
+            f'{target * 100:g}% target</text>'
+        )
     for fraction in (0.25, 0.5, 0.75, 1.0):
         value = top * fraction
         grid.append(
@@ -175,11 +187,12 @@ def _outlook(analysis: Analysis) -> str:
     sku = analysis.capacity.sku
     target = f"{analysis.target * 100:g}%"
     recovery = analysis.recovery_at
-    below = (
-        "already"
-        if recovery == analysis.outlook[0].start
-        else f"in {_duration(analysis.hold_off_seconds)}"
-    )
+    if recovery is None:
+        below = "not within 24 h"
+    elif recovery == analysis.outlook[0].start:
+        below = "already"
+    else:
+        below = f"in {_duration(analysis.hold_off_seconds)} ({recovery:%Y-%m-%d %H:%M} UTC)"
     headroom = analysis.headroom_cu_seconds
     cards = [
         ("Utilization now", _pct(analysis.outlook[0].utilization)),
@@ -194,9 +207,9 @@ def _outlook(analysis: Analysis) -> str:
     )
     chart = _area_chart(
         [w.utilization for w in analysis.outlook],
-        threshold=analysis.target,
+        target=analysis.target,
         title=f"Projected utilization of {sku} over the next 24 h if nothing new runs; "
-        f"dashed line = {target} target",
+        f"red dashed line = 100%, where throttling starts; grey dashed line = {target} target",
     )
     return (
         f'<div class="cards">{card_html}</div>{chart}'
@@ -207,20 +220,33 @@ def _outlook(analysis: Analysis) -> str:
     )
 
 
-def _peak_drivers(analysis: Analysis) -> str:
-    peak = analysis.peak_window
-    if not analysis.peak_drivers or peak.utilization <= 0:
+def _outlook_drivers(analysis: Analysis) -> str:
+    now = analysis.outlook[0] if analysis.outlook else None
+    if not analysis.outlook_drivers or now.utilization <= 0:
         return ""
-    rows = []
-    for row in analysis.peak_drivers:
-        mark = "" if row.exactness == "exact" else ' <span class="est">est</span>'
-        points = row.cu_seconds / peak.budget_cu_seconds * 100
-        rows.append(
-            f"<tr><td>{_e(row.item_name)}{mark}</td>"
-            f"<td>{_e(row.item_kind)}</td>"
-            f"<td>{_e(row.workspace)}</td>"
-            f'<td class="mono num">{row.operations}</td>'
-            f'<td class="mono num">{row.cu_seconds:,.1f}</td>'
+    shown, rest = analysis.outlook_drivers[:5], analysis.outlook_drivers[5:]
+    rows = [
+        (row.item_name, row.item_kind, row.workspace, row.operations, row.cu_seconds,
+         row.exactness)
+        for row in shown
+    ]
+    if rest:
+        rows.append((
+            f"{len(rest)} more items", "", "",
+            sum(row.operations for row in rest),
+            sum(row.cu_seconds for row in rest),
+            "exact" if all(row.exactness == "exact" for row in rest) else "estimated",
+        ))
+    cells = []
+    for name, kind, workspace, operations, cu, exactness in rows:
+        mark = "" if exactness == "exact" else ' <span class="est">est</span>'
+        points = cu / now.budget_cu_seconds * 100
+        cells.append(
+            f"<tr><td>{_e(name)}{mark}</td>"
+            f"<td>{_e(kind)}</td>"
+            f"<td>{_e(workspace)}</td>"
+            f'<td class="mono num">{operations}</td>'
+            f'<td class="mono num">{cu:,.1f}</td>'
             f'<td class="mono num">{points:.1f}</td></tr>'
         )
     opener = (
@@ -229,13 +255,13 @@ def _peak_drivers(analysis: Analysis) -> str:
         else ""
     )
     return (
-        f'<p class="sub">Peak at {peak.start:%Y-%m-%d %H:%M} UTC:'
-        f" {_e(_pct(peak.utilization))} of {_e(analysis.peak_sku)}. Runs that finished in"
-        f" the 24 h before it, largest share first.{_e(opener)}</p>"
+        f'<p class="sub">Committed load now: {_e(_pct(now.utilization))} of'
+        f" {_e(analysis.capacity.sku)}. Runs from the past 24 h whose background CU is still"
+        f" spreading into this window, largest share first.{_e(opener)}</p>"
         '<table class="grid-table"><thead><tr><th>Item</th><th>Kind</th><th>Workspace</th>'
         '<th class="num">Runs</th><th class="num">CU-s in window</th>'
         '<th class="num">Points of utilization</th></tr></thead>'
-        f"<tbody>{''.join(rows)}</tbody></table>"
+        f"<tbody>{''.join(cells)}</tbody></table>"
     )
 
 
@@ -274,6 +300,7 @@ svg{width:100%;height:auto;min-width:640px;display:block}
 .line{fill:none;stroke:var(--accent);stroke-width:1.3}
 .line.delay{stroke:var(--warn)}.line.reject{stroke:var(--bad)}.line.bg{stroke:var(--accent)}
 .over{fill:var(--bad);opacity:.14}
+.target{stroke:var(--muted);stroke-width:1.2;stroke-dasharray:4 3}
 .legend{font-size:12px;color:var(--muted);padding:4px 0 8px}
 .key{margin-right:4px}.key.delay{color:var(--warn)}
 .key.reject{color:var(--bad)}.key.bg{color:var(--accent)}
@@ -401,8 +428,8 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
 <h2>Outlook</h2>
 {_outlook(analysis)}
 
-<h2>What made up the peak</h2>
-{_peak_drivers(analysis)}
+<h2>What's holding utilization up</h2>
+{_outlook_drivers(analysis)}
 
 <h2>Daily</h2>
 {_daily_bars(analysis)}

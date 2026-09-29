@@ -62,7 +62,8 @@ def render(analysis: Analysis, *, include_windows: bool = True) -> str:
             "hold_off_seconds": analysis.hold_off_seconds,
             "headroom_cu_seconds": analysis.headroom_cu_seconds,
         },
-        "peak_drivers": [
+        # Everything in the outlook's first window, so the rows add up to utilization_now.
+        "outlook_drivers": [
             {
                 "workspace": row.workspace,
                 "item_kind": row.item_kind,
@@ -70,9 +71,9 @@ def render(analysis: Analysis, *, include_windows: bool = True) -> str:
                 "cu_seconds": row.cu_seconds,
                 "operations": row.operations,
                 "exactness": row.exactness,
-                "utilization_points": row.cu_seconds / analysis.peak_window.budget_cu_seconds,
+                "utilization": row.cu_seconds / analysis.outlook[0].budget_cu_seconds,
             }
-            for row in analysis.peak_drivers
+            for row in analysis.outlook_drivers
         ],
         "days": [asdict(day) for day in analysis.days],
         "items": [

@@ -136,7 +136,9 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
         lines.append(f"  Outlook if nothing new runs (CU already charged, on {capacity.sku})")
         lines.append(f"    {'Utilization now':<22}{_pct(analysis.outlook[0].utilization).strip()}")
         recovery = analysis.recovery_at
-        if recovery == analysis.outlook[0].start:
+        if recovery is None:
+            when = "still above the target after 24 h"
+        elif recovery == analysis.outlook[0].start:
             when = "already below"
         else:
             when = f"in {_duration(analysis.hold_off_seconds)} ({recovery:%Y-%m-%d %H:%M} UTC)"
@@ -150,18 +152,27 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
         lines.append("    not counted, and estimated (~) CU tends to run low.")
         lines.append("")
 
-    peak = analysis.peak_window
-    if analysis.peak_drivers and peak.utilization > 0:
+    now = analysis.outlook[0] if analysis.outlook else None
+    if analysis.outlook_drivers and now.utilization > 0:
         lines.append(
-            f"  Peak {peak.start:%Y-%m-%d %H:%M} UTC at {_pct(peak.utilization).strip()}"
-            f" of {analysis.peak_sku}, made up of"
+            f"  Committed load now, {_pct(now.utilization).strip()} of {capacity.sku}, made up of"
         )
         if analysis.collection.high_concurrency_present:
             lines.append("  (by Spark session, attributed to the notebook that OPENED it)")
-        for row in analysis.peak_drivers:
-            mark = "" if row.exactness == "exact" else " ~"
-            points = row.cu_seconds / peak.budget_cu_seconds * 100
-            lines.append(f"    {(row.item_name + mark)[:36]:<38}{points:6.1f} pts")
+        shown, rest = analysis.outlook_drivers[:5], analysis.outlook_drivers[5:]
+        rows = [(row.item_name, row.cu_seconds, row.exactness) for row in shown]
+        if rest:
+            rows.append((
+                f"{len(rest)} more items",
+                sum(row.cu_seconds for row in rest),
+                "exact" if all(row.exactness == "exact" for row in rest) else "estimated",
+            ))
+        for name, cu, exactness in rows:
+            mark = "" if exactness == "exact" else " ~"
+            points = cu / now.budget_cu_seconds * 100
+            lines.append(f"    {name[:34] + mark:<38}{points:6.1f} pts")
+        if any(exactness != "exact" for _, _, exactness in rows):
+            lines.append("    ~ = estimated, not measured")
         lines.append("")
 
     lines.append(f"  {'DATE':<12}{'CU-s':>12}{'UTIL':>8}{'RUNS':>7}{'FAILED':>8}{'QUEUED':>9}")
@@ -197,7 +208,7 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
             delta_text = "     n/a" if delta is None else f"{delta:+7.0f}%"
             mark = "" if row.exactness == "exact" else " ~"
             lines.append(
-                f"  {(row.item_name + mark)[:36]:<38}{row.item_kind[:10]:<12}"
+                f"  {row.item_name[:34] + mark:<38}{row.item_kind[:10]:<12}"
                 f"{_num(row.cu_seconds):>11}{row.operations:>6}{row.failed:>6}{delta_text:>8}"
             )
         lines.append("")
