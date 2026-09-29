@@ -255,6 +255,7 @@ def _outlook_drivers(analysis: Analysis) -> str:
         else ""
     )
     return (
+        "<h2>What's holding utilization up</h2>"
         f'<p class="sub">Committed load now: {_e(_pct(now.utilization))} of'
         f" {_e(analysis.capacity.sku)}. Runs from the past 24 h whose background CU is still"
         f" spreading into this window, largest share first.{_e(opener)}</p>"
@@ -428,7 +429,6 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
 <h2>Outlook</h2>
 {_outlook(analysis)}
 
-<h2>What's holding utilization up</h2>
 {_outlook_drivers(analysis)}
 
 <h2>Daily</h2>

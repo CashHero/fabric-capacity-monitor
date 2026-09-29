@@ -280,6 +280,12 @@ def test_outlook_drivers_add_up_to_the_committed_load_and_keep_estimates_marked(
     assert "~ = estimated, not measured" in out  # legend without --by-item
 
 
+def test_calm_capacity_has_no_drivers_section(rates):
+    analysis = _f4(rates, [_op("old", 999_999.0, START)])  # spread finished before now
+    assert analysis.outlook[0].utilization == 0
+    assert "holding utilization up" not in html_report.render(analysis)
+
+
 def test_headroom_is_the_spare_share_of_the_next_24_hours(rates):
     # 40% of an F4 committed now: 60% of every window in the next 24 h is spare.
     analysis = _f4(rates, [_op("hourly", 48.0 * rates.background_windows,
