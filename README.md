@@ -54,7 +54,10 @@ API documents are not currently populated.
 
 **Everything else is estimated** from published rates and marked `est` / `~` in the output.
 Pipeline orchestration is charged per activity run and no public API exposes activity
-counts, so pipeline CU is reported as a lower bound. Rates live in
+counts, so pipeline CU is reported as a lower bound. Dataflow Gen2 refreshes — including
+those a pipeline triggers — are priced from each run's wall-clock duration at the CI/CD
+query-evaluation rate; per-query durations and High Scale staging compute aren't exposed,
+so that figure can land either side of the true charge. Rates live in
 [`rates.toml`](src/fabric_capacity_monitor/rates.toml), each with a documentation link and
 an "as of" date, and any of them can be overridden in your config file.
 
@@ -106,8 +109,9 @@ Two ways to get true per-notebook figures:
 - OneLake transactions, SQL analytics endpoint queries, semantic model refreshes and
   Eventhouse uptime. No free API exposes their CU; they are listed explicitly as
   *not counted* rather than silently dropped.
-- Dataflow Gen2 refreshes triggered from inside a pipeline register no job instances, so
-  there is no duration to price.
+- Eventstreams. A running one bills a flat 0.222 CU while events flow — about 6% of an
+  F4 — plus data traffic and the Eventhouse it feeds. The report can't measure that, but it
+  names every running Eventstream on the capacity under *not counted*.
 - The Metrics app's Storage page.
 
 History is limited to what the Spark API retains — about 30 days. Use `--json` if you want

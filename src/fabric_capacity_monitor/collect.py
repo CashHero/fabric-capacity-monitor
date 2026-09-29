@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .cu import orchestration_cu_seconds, session_vcores, spark_cu_seconds
+from .cu import dataflow_cu_seconds, orchestration_cu_seconds, session_vcores, spark_cu_seconds
 from .fabric_api import FabricClient
 from .model import BACKGROUND, ESTIMATED, EXACT, Capacity, Operation, parse_fabric_time
 from .rates import Rates
@@ -150,6 +150,88 @@ def collect_pipelines(
         )
 
 
+def collect_dataflows(
+    client: FabricClient,
+    capacity: Capacity,
+    rates: Rates,
+    since: datetime,
+    collection: Collection,
+) -> None:
+    """Dataflow Gen2 refreshes, including those a pipeline triggers.
+
+    Priced from each run's wall-clock duration at the CI/CD query-evaluation rate. Fabric
+    bills per query evaluation and for High Scale staging compute, neither of which a
+    public API exposes, so the figure can land either side of the true charge.
+    """
+    charged = False
+    for workspace in capacity.workspaces:
+        ws_id = workspace["id"]
+        ws_name = workspace.get("displayName", ws_id)
+        dataflows = [i for i in client.items(ws_id) if i.get("type") == "Dataflow"]
+        for dataflow in dataflows:
+            for run in client.job_instances(ws_id, dataflow["id"]):
+                end = parse_fabric_time(run.get("endTimeUtc"))
+                start = parse_fabric_time(run.get("startTimeUtc"))
+                if end is None or start is None or end < since:
+                    continue
+                charged = True
+                span = (end - start).total_seconds()
+                collection.operations.append(
+                    Operation(
+                        source="dataflow",
+                        exactness=ESTIMATED,
+                        workspace_id=ws_id,
+                        workspace_name=ws_name,
+                        item_id=dataflow["id"],
+                        item_name=dataflow.get("displayName", "(dataflow)"),
+                        item_kind="Dataflow",
+                        operation_name=f"Dataflow {run.get('invokeType', 'Run')}",
+                        status=run.get("status") or "Unknown",
+                        start=start,
+                        end=end,
+                        duration_seconds=span,
+                        cu_seconds=dataflow_cu_seconds(span, rates),
+                        utilization_type=BACKGROUND,
+                        job_instance_id=run.get("id"),
+                        note="estimated from run wall-clock at the CI/CD rate",
+                    )
+                )
+    if charged:
+        collection.warnings.append(
+            "Dataflow Gen2 CU is estimated from each run's wall-clock duration at the CI/CD "
+            "rate — per-query durations and High Scale staging compute are not exposed."
+        )
+
+
+def collect_eventstreams(
+    client: FabricClient,
+    capacity: Capacity,
+    rates: Rates,
+    collection: Collection,
+) -> None:
+    """List running Eventstreams: they bill continuously and no free API exposes the CU."""
+    flat = rates.eventstream_flat_cu
+    share = f", ~{flat / capacity.base_cu:.0%} of this {capacity.sku}" if capacity.base_cu else ""
+    for workspace in capacity.workspaces:
+        ws_id = workspace["id"]
+        ws_name = workspace.get("displayName", ws_id)
+        for item in client.items(ws_id):
+            if item.get("type") != "Eventstream":
+                continue
+            topology = client.eventstream_topology(ws_id, item["id"])
+            nodes = [
+                node
+                for part in ("sources", "operators", "streams", "destinations")
+                for node in topology.get(part) or []
+            ]
+            if any(node.get("status") == "Running" for node in nodes):
+                collection.unaccounted.append(
+                    f"Eventstream '{item.get('displayName', item['id'])}' ({ws_name}) is "
+                    f"running — while events flow it bills a flat {flat} CU{share}, plus data "
+                    "traffic and the uptime of any Eventhouse it feeds."
+                )
+
+
 def collect(
     client: FabricClient,
     capacity: Capacity,
@@ -162,18 +244,9 @@ def collect(
     collect_spark(client, capacity, rates, since, collection)
     if include_pipelines:
         collect_pipelines(client, capacity, rates, since, collection)
+    collect_dataflows(client, capacity, rates, since, collection)
+    collect_eventstreams(client, capacity, rates, collection)
 
-    dataflows = sum(
-        1
-        for workspace in capacity.workspaces
-        for item in client.items(workspace["id"])
-        if item.get("type") == "Dataflow"
-    )
-    if dataflows:
-        collection.unaccounted.append(
-            f"Dataflow Gen2 ({dataflows} item(s)) — refreshes triggered from inside a pipeline "
-            "register no job instances, so no duration is available to price."
-        )
     collection.unaccounted.append(
         "OneLake transactions, SQL analytics endpoint queries, semantic models and "
         "Eventhouse uptime — no free API exposes their CU."

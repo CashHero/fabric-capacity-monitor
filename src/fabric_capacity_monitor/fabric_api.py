@@ -131,3 +131,9 @@ class FabricClient:
             return list(self.paged(f"/workspaces/{workspace_id}/items/{item_id}/jobs/instances"))
         except FabricError:
             return []
+
+    def eventstream_topology(self, workspace_id: str, item_id: str) -> dict:
+        try:
+            return self.get(f"/workspaces/{workspace_id}/eventstreams/{item_id}/topology")
+        except FabricError:
+            return {}

@@ -25,9 +25,11 @@ POOL = {
 class StubClient:
     """Stands in for FabricClient. Only the methods collect() uses are implemented."""
 
-    def __init__(self, sessions, items=None):
+    def __init__(self, sessions, items=None, runs=None, topologies=None):
         self._sessions = sessions
         self._items = items or []
+        self._runs = runs or {}
+        self._topologies = topologies or {}
 
     def default_pool(self, workspace_id):
         return POOL
@@ -39,7 +41,10 @@ class StubClient:
         return self._items
 
     def job_instances(self, workspace_id, item_id):
-        return []
+        return self._runs.get(item_id, [])
+
+    def eventstream_topology(self, workspace_id, item_id):
+        return self._topologies.get(item_id, {})
 
 
 @pytest.fixture
@@ -129,9 +134,48 @@ def test_report_says_by_item_when_high_concurrency_is_off(rates, sessions, capac
     assert "BY SPARK SESSION" not in rendered
 
 
-def test_dataflows_are_reported_as_unaccounted(rates, sessions, capacity):
+def test_dataflow_runs_are_priced_as_estimates(rates, capacity):
     items = [{"id": "d1", "type": "Dataflow", "displayName": "extract"}]
+    runs = {"d1": [
+        {"id": "r1", "status": "Completed", "invokeType": "Manual",
+         "startTimeUtc": "2026-09-01T06:00:00.1234567", "endTimeUtc": "2026-09-01T06:05:00.1234567"},
+        {"id": "r2", "status": "InProgress", "invokeType": "Manual",
+         "startTimeUtc": "2026-09-01T07:00:00", "endTimeUtc": None},
+        {"id": "r3", "status": "Completed", "invokeType": "Manual",
+         "startTimeUtc": "2026-07-01T06:00:00", "endTimeUtc": "2026-07-01T06:05:00"},
+    ]}
+    result = collect(StubClient([], items, runs), capacity, rates, datetime(2026, 8, 1, tzinfo=UTC))
+    [run] = [op for op in result.operations if op.source == "dataflow"]
+    # 300 s inside the CI/CD first tier: 12 CU * 300 s.
+    assert run.cu_seconds == pytest.approx(3600.0)
+    assert run.exactness == "estimated"
+    assert run.item_kind == "Dataflow"
+    assert run.succeeded
+    assert not any("Dataflow" in entry for entry in result.unaccounted)
+    assert any("Dataflow Gen2 CU is estimated" in w for w in result.warnings)
+
+
+def test_running_eventstream_is_listed_as_unaccounted(rates, capacity):
+    items = [{"id": "e1", "type": "Eventstream", "displayName": "Monitoring_Eventstream"}]
+    topologies = {"e1": {
+        "streams": [{"name": "s", "status": "Running"}],
+        "destinations": [{"name": "d", "status": "Running"}],
+    }}
     result = collect(
-        StubClient(sessions, items), capacity, rates, datetime(2026, 8, 1, tzinfo=UTC)
+        StubClient([], items, topologies=topologies), capacity, rates,
+        datetime(2026, 8, 1, tzinfo=UTC),
     )
-    assert any("Dataflow Gen2" in entry for entry in result.unaccounted)
+    [entry] = [e for e in result.unaccounted if "Eventstream" in e and "Monitoring" in e]
+    assert "analytics" in entry
+    assert "running" in entry
+    assert "F4" in entry
+
+
+def test_stopped_eventstream_is_not_listed(rates, capacity):
+    items = [{"id": "e1", "type": "Eventstream", "displayName": "Monitoring_Eventstream"}]
+    topologies = {"e1": {"streams": [{"name": "s", "status": "Paused"}]}}
+    result = collect(
+        StubClient([], items, topologies=topologies), capacity, rates,
+        datetime(2026, 8, 1, tzinfo=UTC),
+    )
+    assert not any("Monitoring_Eventstream" in entry for entry in result.unaccounted)

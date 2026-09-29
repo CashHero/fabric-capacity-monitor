@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Dataflow Gen2 refreshes are now priced (estimated) from their job-instance run history,
+  including refreshes triggered from a pipeline.
+- Running Eventstreams are listed under *not counted* with their flat hourly charge, so an
+  always-on stream is visible even though its CU can't be measured.
+
 ### Fixed
 
 - The utilization timeline now includes background CU carried in from runs that ended
   up to 24 hours before the reporting range. Previously the first day of every report
   started from zero, understating early utilization, peaks and the average.
+- The README claimed pipeline-triggered Dataflow Gen2 refreshes register no job
+  instances. They do, and are now counted.
 
 ## [0.1.0] - 2026-09-10
 
