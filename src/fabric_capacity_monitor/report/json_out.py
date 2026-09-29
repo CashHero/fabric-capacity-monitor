@@ -54,6 +54,27 @@ def render(analysis: Analysis, *, include_windows: bool = True) -> str:
             "current_sku_throttle_breaches": analysis.current_breaches,
             "at_risk": analysis.at_risk,
         },
+        # The next 24 h on the current SKU if nothing new runs.
+        "outlook": {
+            "target": analysis.target,
+            "utilization_now": analysis.outlook[0].utilization if analysis.outlook else None,
+            "recovery_at": analysis.recovery_at,
+            "hold_off_seconds": analysis.hold_off_seconds,
+            "headroom_cu_seconds": analysis.headroom_cu_seconds,
+        },
+        # Everything in the outlook's first window, so the rows add up to utilization_now.
+        "outlook_drivers": [
+            {
+                "workspace": row.workspace,
+                "item_kind": row.item_kind,
+                "item_name": row.item_name,
+                "cu_seconds": row.cu_seconds,
+                "operations": row.operations,
+                "exactness": row.exactness,
+                "utilization": row.cu_seconds / analysis.outlook[0].budget_cu_seconds,
+            }
+            for row in analysis.outlook_drivers
+        ],
         "days": [asdict(day) for day in analysis.days],
         "items": [
             {**asdict(row), "users": sorted(row.users), "performance_delta": row.performance_delta}
@@ -65,4 +86,5 @@ def render(analysis: Analysis, *, include_windows: bool = True) -> str:
     }
     if include_windows:
         payload["windows"] = [asdict(w) for w in analysis.windows]
+        payload["outlook"]["windows"] = [asdict(w) for w in analysis.outlook]
     return json.dumps(payload, indent=2, default=_encode)

@@ -147,6 +147,31 @@ def build_timeline(
     return windows
 
 
+def window_contributions(
+    operations: list[Operation], at: datetime, rates: Rates
+) -> list[tuple[Operation, float]]:
+    """CU-seconds each operation puts into the window starting at ``at``.
+
+    Uses the same placement as ``build_timeline``: background CU covers the
+    ``background_windows`` windows from the one an operation ended in, interactive CU
+    only that one window.
+    """
+    window_seconds = rates.window_seconds
+    target = floor_window(at, window_seconds)
+    out: list[tuple[Operation, float]] = []
+    for operation in operations:
+        if operation.cu_seconds <= 0 or operation.end is None:
+            continue
+        finish = floor_window(operation.end, window_seconds)
+        offset = int((target - finish).total_seconds() // window_seconds)
+        if operation.utilization_type != BACKGROUND:
+            if offset == 0:
+                out.append((operation, operation.cu_seconds))
+        elif 0 <= offset < rates.background_windows:
+            out.append((operation, operation.cu_seconds / rates.background_windows))
+    return out
+
+
 def throttle_breaches(windows: list[Window]) -> dict[str, int]:
     """Count windows whose forward-window mean crossed each throttling threshold."""
     return {

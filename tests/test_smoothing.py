@@ -5,7 +5,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from fabric_capacity_monitor.model import BACKGROUND, EXACT, INTERACTIVE, Operation
-from fabric_capacity_monitor.smoothing import build_timeline, floor_window, throttle_breaches
+from fabric_capacity_monitor.smoothing import (
+    build_timeline,
+    floor_window,
+    throttle_breaches,
+    window_contributions,
+)
 
 START = datetime(2026, 9, 1, tzinfo=UTC)
 
@@ -140,3 +145,17 @@ def test_resize_changes_the_budget_from_the_window_it_happens_in(rates):
     assert windows[index].utilization == pytest.approx(0.5)
     assert windows[index].budget_cu_seconds == pytest.approx(240.0)
     assert windows[-2].utilization == pytest.approx(0.5)
+
+
+def test_window_contributions_add_up_to_the_window(rates):
+    ops = [
+        make_op(START + timedelta(hours=1), 28_800.0),  # background, still spreading
+        make_op(START + timedelta(hours=2), 500.0, kind=INTERACTIVE),  # lands in its own window
+        make_op(START + timedelta(hours=3), 300.0, kind=INTERACTIVE),  # the window under test
+        make_op(START - timedelta(days=2), 99_999.0),  # spread finished long ago
+    ]
+    windows = build_timeline(ops, START, START + timedelta(days=1), base_cu=4.0, rates=rates)
+    window = next(w for w in windows if w.start == floor_window(START + timedelta(hours=3), 30))
+    parts = window_contributions(ops, window.start, rates)
+    assert {op.cu_seconds for op, _ in parts} == {28_800.0, 300.0}
+    assert sum(cu for _, cu in parts) == pytest.approx(window.cu_seconds)

@@ -78,6 +78,24 @@ by the mean utilization of a *forward* window:
 | Interactive rejection | 60 minutes | user-triggered operations are rejected |
 | Background rejection | 24 hours | scheduled jobs are rejected |
 
+**Outlook.** Smoothing means most of the next day's utilization is already set by runs
+that have finished. The report projects the next 24 hours on the current SKU as if nothing
+new runs, and shows three things:
+
+- **When utilization drops below the target**, 50% by default (`--target PCT`, or
+  `target_utilization` in the config). If you need the capacity to calm down, this tells
+  you how long to hold off new runs.
+- **Headroom now**: how many CU-seconds of background work could be charged right now
+  without starting any throttle. A job is charged when it *ends*, by which point the
+  committed load has fallen further, so this figure is conservative.
+- **What's holding it up**: runs from the past 24 hours whose background CU is still
+  spreading into now, per item, in percentage points of utilization. These set the recovery
+  time and headroom above.
+
+The projection only counts what the report can see. Spark sessions still running, and
+workloads listed as *not counted*, add more load. So the true recovery time can be later
+and the true headroom smaller.
+
 ## High-concurrency sessions: read the per-item table carefully
 
 When a workspace has high concurrency enabled for pipeline runs, Fabric opens **one Spark
@@ -146,6 +164,7 @@ Optional, at `~/.config/fabric-capacity-monitor/config.toml` or via `--config`:
 
 ```toml
 default_capacity = "my-capacity"
+target_utilization = 50   # the outlook counts down to this percentage (default 50)
 
 [aliases]
 prod = "my-prod-capacity"
