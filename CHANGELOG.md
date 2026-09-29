@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The utilization timeline now includes background CU carried in from runs that ended
   up to 24 hours before the reporting range. Previously the first day of every report
   started from zero, understating early utilization, peaks and the average.
+- The HTML dashboard showed garbled characters (`Â·` for `·`, `â†’` for `→`) when opened
+  from disk, because the page didn't declare its encoding. It now declares UTF-8.
 - The README claimed pipeline-triggered Dataflow Gen2 refreshes register no job
   instances. They do, and are now counted.
 

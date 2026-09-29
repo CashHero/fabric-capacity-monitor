@@ -398,7 +398,8 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
             f"<th>Status</th></tr></thead><tbody>{rows}</tbody></table>"
         )
 
-    return f"""<title>Capacity · {_e(capacity.name)}</title>
+    return f"""<meta charset="utf-8">
+<title>Capacity ·{_e(capacity.name)}</title>
 <style>{_CSS}</style>
 <div class="wrap">
 <h1>{_e(capacity.name)}</h1>
