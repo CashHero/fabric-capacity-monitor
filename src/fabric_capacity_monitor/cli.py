@@ -63,6 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report.add_argument("--no-pipelines", action="store_true", help="skip pipeline job history")
     report.add_argument("--include-cost", action="store_true", help="query Azure Cost Management")
+    report.add_argument(
+        "--target",
+        type=float,
+        metavar="PCT",
+        help="utilization the outlook counts down to (default 50)",
+    )
     report.add_argument("--quiet", action="store_true", help="suppress the text report on stdout")
     return parser
 
@@ -156,6 +162,11 @@ def cmd_report(args: argparse.Namespace, fabric: FabricClient, arm: ArmClient, r
             file=sys.stderr,
         )
         days = MAX_DAYS
+    try:
+        target = config_module.resolve_target(user_config, args.target)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     capacities = _capacities(fabric, arm)
     wanted = config_module.resolve_capacity_name(user_config, args.capacity)
@@ -216,7 +227,8 @@ def cmd_report(args: argparse.Namespace, fabric: FabricClient, arm: ArmClient, r
             )
 
     analysis = analyse(
-        collection, rates, start, end, cost_rows=cost_rows, activity_events=events
+        collection, rates, start, end, cost_rows=cost_rows, activity_events=events,
+        target=target,
     )
 
     if not args.quiet:

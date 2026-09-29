@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from ..collect import Collection
 from ..model import Capacity, Operation, SkuChange, Window, sku_cu
 from ..rates import Rates
-from ..smoothing import build_timeline, throttle_breaches
+from ..smoothing import build_timeline, throttle_breaches, window_contributions
 
 
 @dataclass
@@ -74,6 +74,11 @@ class Analysis:
     users: set[str]
     cost_rows: list[tuple[float, str, str]] | None = None
     activity_events: list[dict] = field(default_factory=list)
+    target: float = 0.5  # utilization the outlook counts down to
+    # The next 24 h on the current SKU if nothing new runs: background CU already charged.
+    outlook: list[Window] = field(default_factory=list)
+    # What made up the peak window, per item; cu_seconds is the share of that window only.
+    peak_drivers: list[ItemRow] = field(default_factory=list)
 
     @property
     def capacity(self):
@@ -118,6 +123,38 @@ class Analysis:
         """Resizes inside the reported range."""
         return [c for c in self.capacity.sku_changes if self.start <= c.at <= self.end]
 
+    @property
+    def recovery_at(self) -> datetime | None:
+        """When committed load first drops below ``target`` if nothing new runs.
+
+        Committed background CU only ever tails off, so the first window under the target
+        stays under it. The outlook's first window means it is already below.
+        """
+        return next((w.start for w in self.outlook if w.utilization < self.target), None)
+
+    @property
+    def hold_off_seconds(self) -> float | None:
+        """How long from the end of the range until ``recovery_at``."""
+        recovery = self.recovery_at
+        if recovery is None:
+            return None
+        return max((recovery - self.end).total_seconds(), 0.0)
+
+    @property
+    def headroom_cu_seconds(self) -> float | None:
+        """Background CU-s that could be charged now without starting any throttle.
+
+        Added background load raises each of the next 24 h of windows evenly, and
+        committed load only tails off, so the 10-minute forward mean now is the binding
+        horizon. Conservative: a job is charged when it ends, by which time committed
+        load has fallen further.
+        """
+        if not self.outlook:
+            return None
+        now = self.outlook[0]
+        spare = max(1.0 - now.interactive_delay, 0.0)
+        return spare * now.budget_cu_seconds * self.rates.background_windows
+
 
 def _bucket(operations: list[Operation], key) -> dict:
     grouped: dict = defaultdict(list)
@@ -159,6 +196,23 @@ def _budget(capacity: Capacity, lo: datetime, hi: datetime) -> float | None:
     return total
 
 
+def _peak_drivers(operations: list[Operation], windows: list[Window], rates: Rates,
+                  top: int = 5) -> list[ItemRow]:
+    """Per-item CU-s in the peak window, largest first."""
+    if not windows:
+        return []
+    peak = max(windows, key=lambda w: w.utilization)
+    rows: dict[tuple, ItemRow] = {}
+    for operation, cu in window_contributions(operations, peak.start, rates):
+        key = (operation.workspace_name, operation.item_kind, operation.item_name)
+        row = rows.setdefault(key, ItemRow(*key))
+        row.cu_seconds += cu
+        row.operations += 1
+        if operation.exactness != "exact":
+            row.exactness = "estimated"
+    return sorted(rows.values(), key=lambda r: -r.cu_seconds)[:top]
+
+
 def analyse(
     collection: Collection,
     rates: Rates,
@@ -167,6 +221,7 @@ def analyse(
     *,
     cost_rows: list[tuple[float, str, str]] | None = None,
     activity_events: list[dict] | None = None,
+    target: float = 0.5,
 ) -> Analysis:
     operations = [op for op in collection.operations if op.end and start <= op.end <= end]
     capacity = collection.capacity
@@ -188,6 +243,12 @@ def analyse(
     current = windows
     if capacity.base_cu and any(c.at > start for c in capacity.sku_changes):
         current = build_timeline(smoothed, start, end, capacity.base_cu, rates)
+    horizon = timedelta(seconds=rates.background_windows * rates.window_seconds)
+    outlook = (
+        build_timeline(smoothed, end, end + horizon, capacity.base_cu, rates)
+        if capacity.base_cu
+        else []
+    )
 
     days_map: dict[str, DayRow] = {}
     for operation in operations:
@@ -242,4 +303,7 @@ def analyse(
         users={op.user for op in operations if op.user},
         cost_rows=cost_rows,
         activity_events=activity_events or [],
+        target=target,
+        outlook=outlook,
+        peak_drivers=_peak_drivers(smoothed, windows, rates),
     )

@@ -29,6 +29,11 @@ def _pct(value: float | None, digits: int = 1) -> str:
     return "n/a" if value is None else f"{value * 100:.{digits}f}%"
 
 
+def _duration(seconds: float) -> str:
+    minutes = -(-int(seconds) // 60)  # round up: "wait 0h 00m" would be wrong
+    return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
 def _downsample(values: list[float], buckets: int) -> list[float]:
     """Peak per bucket, matching how the Metrics app collapses timepoints when zoomed out."""
     if not values:
@@ -160,6 +165,76 @@ def _items_table(analysis: Analysis, top: int) -> str:
         '<table class="grid-table"><thead><tr><th>Item</th><th>Kind</th><th>Workspace</th>'
         '<th class="num">CU-s</th><th class="num">Duration s</th><th class="num">Runs</th>'
         '<th class="num">Failed</th><th class="num">Δ 7d</th></tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _outlook(analysis: Analysis) -> str:
+    if not analysis.outlook:
+        return ""
+    sku = analysis.capacity.sku
+    target = f"{analysis.target * 100:g}%"
+    recovery = analysis.recovery_at
+    below = (
+        "already"
+        if recovery == analysis.outlook[0].start
+        else f"in {_duration(analysis.hold_off_seconds)}"
+    )
+    headroom = analysis.headroom_cu_seconds
+    cards = [
+        ("Utilization now", _pct(analysis.outlook[0].utilization)),
+        (f"Below {target} target", below),
+        ("Headroom now (CU-s)", f"{headroom:,.0f}"),
+        (f"Headroom at full {sku}", f"{headroom / analysis.capacity.base_cu / 3600:.1f} h"),
+    ]
+    card_html = "".join(
+        f'<div class="card"><div class="label">{_e(label)}</div>'
+        f'<div class="value">{_e(value)}</div></div>'
+        for label, value in cards
+    )
+    chart = _area_chart(
+        [w.utilization for w in analysis.outlook],
+        threshold=analysis.target,
+        title=f"Projected utilization of {sku} over the next 24 h if nothing new runs; "
+        f"dashed line = {target} target",
+    )
+    return (
+        f'<div class="cards">{card_html}</div>{chart}'
+        '<p class="note plain">A lower bound on load: sessions still running and workloads '
+        "listed as not counted are missing, and estimated CU tends to run low. "
+        "Headroom is background CU that could be charged now without starting any "
+        "throttle.</p>"
+    )
+
+
+def _peak_drivers(analysis: Analysis) -> str:
+    peak = analysis.peak_window
+    if not analysis.peak_drivers or peak.utilization <= 0:
+        return ""
+    rows = []
+    for row in analysis.peak_drivers:
+        mark = "" if row.exactness == "exact" else ' <span class="est">est</span>'
+        points = row.cu_seconds / peak.budget_cu_seconds * 100
+        rows.append(
+            f"<tr><td>{_e(row.item_name)}{mark}</td>"
+            f"<td>{_e(row.item_kind)}</td>"
+            f"<td>{_e(row.workspace)}</td>"
+            f'<td class="mono num">{row.operations}</td>'
+            f'<td class="mono num">{row.cu_seconds:,.1f}</td>'
+            f'<td class="mono num">{points:.1f}</td></tr>'
+        )
+    opener = (
+        " By Spark session, attributed to the notebook that opened it."
+        if analysis.collection.high_concurrency_present
+        else ""
+    )
+    return (
+        f'<p class="sub">Peak at {peak.start:%Y-%m-%d %H:%M} UTC:'
+        f" {_e(_pct(peak.utilization))} of {_e(analysis.peak_sku)}. Runs that finished in"
+        f" the 24 h before it, largest share first.{_e(opener)}</p>"
+        '<table class="grid-table"><thead><tr><th>Item</th><th>Kind</th><th>Workspace</th>'
+        '<th class="num">Runs</th><th class="num">CU-s in window</th>'
+        '<th class="num">Points of utilization</th></tr></thead>'
         f"<tbody>{''.join(rows)}</tbody></table>"
     )
 
@@ -322,6 +397,12 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
     threshold=1.0,
     title="Cumulative carryforward, as a multiple of one window's CU budget",
 )}
+
+<h2>Outlook</h2>
+{_outlook(analysis)}
+
+<h2>What made up the peak</h2>
+{_peak_drivers(analysis)}
 
 <h2>Daily</h2>
 {_daily_bars(analysis)}

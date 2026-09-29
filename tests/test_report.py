@@ -210,3 +210,56 @@ def test_a_resize_near_the_end_puts_its_label_left_of_the_marker(rates):
     marker = next(line for line in out.splitlines() if "^" in line)
     assert marker.rstrip().endswith("F4→F8 ^")
     assert marker.index("^") - 4 == 59
+
+
+def _loaded_until_end(rates):
+    # On an F4: a run filling the capacity whose spread ends 4 h after END, plus one
+    # filling 40% for the rest of the day.
+    capacity = Capacity(id="c", name="demo", sku="F4",
+                        workspaces=[{"id": "w", "displayName": "analytics"}])
+    collection = Collection(capacity=capacity)
+    collection.operations = [
+        _op("nightly", 120.0 * rates.background_windows, END - timedelta(hours=20)),
+        _op("hourly", 48.0 * rates.background_windows, END - timedelta(hours=2)),
+    ]
+    return analyse(collection, rates, START, END)
+
+
+def test_outlook_says_when_committed_load_drops_below_the_target(rates):
+    analysis = _loaded_until_end(rates)
+    assert analysis.outlook[0].utilization == pytest.approx(1.4)
+    assert analysis.recovery_at == END + timedelta(hours=4)
+    assert analysis.headroom_cu_seconds == 0
+
+    out = text_report.render(analysis)
+    assert "Below 50% target      in 4h 00m (2026-09-03 04:00 UTC)" in out
+    payload = json.loads(json_out.render(analysis))
+    assert payload["outlook"]["recovery_at"] == "2026-09-03T04:00:00+00:00"
+    assert payload["outlook"]["hold_off_seconds"] == 4 * 3600
+    assert "Outlook" in html_report.render(analysis)
+
+
+def test_outlook_honours_a_higher_target(rates):
+    collection = _loaded_until_end(rates).collection
+    analysis = analyse(collection, rates, START, END, target=1.5)
+    assert analysis.recovery_at == END
+
+
+def test_idle_capacity_is_already_below_target_with_full_headroom(analysis, rates):
+    assert analysis.recovery_at == END
+    assert analysis.headroom_cu_seconds == pytest.approx(120.0 * rates.background_windows)
+    assert "already below" in text_report.render(analysis)
+
+
+def test_peak_drivers_add_up_to_the_peak_and_keep_estimates_marked(analysis):
+    points = [row.cu_seconds / analysis.peak_window.budget_cu_seconds
+              for row in analysis.peak_drivers]
+    assert sum(points) == pytest.approx(analysis.peak_utilization)
+    assert analysis.peak_drivers[0].item_name == "transform"
+    pipeline = next(r for r in analysis.peak_drivers if r.item_name == "pipeline")
+    assert pipeline.exactness == "estimated"
+    driver_line = next(
+        line for line in text_report.render(analysis).splitlines()
+        if "pipeline" in line
+    )
+    assert "~" in driver_line

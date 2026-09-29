@@ -37,3 +37,12 @@ def resolve_capacity_name(config: dict[str, Any], requested: str | None) -> str 
         return str(aliases.get(requested, requested))
     default = config.get("default_capacity")
     return str(default) if default else None
+
+
+def resolve_target(config: dict[str, Any], requested: float | None) -> float:
+    """Target utilization as a fraction: the flag, else ``target_utilization``, else 50%."""
+    percent = requested if requested is not None else config.get("target_utilization", 50)
+    percent = float(percent)
+    if not 0 < percent <= 100:
+        raise ValueError(f"target utilization must be above 0 and at most 100, got {percent:g}")
+    return percent / 100.0

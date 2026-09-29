@@ -19,6 +19,11 @@ def _num(value: float) -> str:
     return f"{value:,.0f}"
 
 
+def _duration(seconds: float) -> str:
+    minutes = -(-int(seconds) // 60)  # round up: "wait 0h 00m" would be wrong
+    return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
 def _sparkline(values: list[float], width: int = 60) -> str:
     """A coarse utilization sparkline; '!' marks any bucket that went over budget."""
     blocks = " ▁▂▃▄▅▆▇█"
@@ -124,6 +129,39 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
             + " " * 52
             + f"{analysis.end:%m-%d}"
         )
+        lines.append("")
+
+    if analysis.outlook:
+        target = f"{analysis.target * 100:g}%"
+        lines.append(f"  Outlook if nothing new runs (CU already charged, on {capacity.sku})")
+        lines.append(f"    {'Utilization now':<22}{_pct(analysis.outlook[0].utilization).strip()}")
+        recovery = analysis.recovery_at
+        if recovery == analysis.outlook[0].start:
+            when = "already below"
+        else:
+            when = f"in {_duration(analysis.hold_off_seconds)} ({recovery:%Y-%m-%d %H:%M} UTC)"
+        lines.append(f"    {f'Below {target} target':<22}{when}")
+        headroom = analysis.headroom_cu_seconds
+        lines.append(
+            f"    {'Headroom now':<22}{_num(headroom)} CU-s"
+            f"  (≈ {headroom / capacity.base_cu / 3600:.1f} h at the full {capacity.sku})"
+        )
+        lines.append("    Lower bound on load: excludes sessions still running and anything")
+        lines.append("    not counted, and estimated (~) CU tends to run low.")
+        lines.append("")
+
+    peak = analysis.peak_window
+    if analysis.peak_drivers and peak.utilization > 0:
+        lines.append(
+            f"  Peak {peak.start:%Y-%m-%d %H:%M} UTC at {_pct(peak.utilization).strip()}"
+            f" of {analysis.peak_sku}, made up of"
+        )
+        if analysis.collection.high_concurrency_present:
+            lines.append("  (by Spark session, attributed to the notebook that OPENED it)")
+        for row in analysis.peak_drivers:
+            mark = "" if row.exactness == "exact" else " ~"
+            points = row.cu_seconds / peak.budget_cu_seconds * 100
+            lines.append(f"    {(row.item_name + mark)[:36]:<38}{points:6.1f} pts")
         lines.append("")
 
     lines.append(f"  {'DATE':<12}{'CU-s':>12}{'UTIL':>8}{'RUNS':>7}{'FAILED':>8}{'QUEUED':>9}")
