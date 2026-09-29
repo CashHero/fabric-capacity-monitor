@@ -20,7 +20,7 @@ from . import config as config_module
 from .arm import ArmClient
 from .auth import AuthError, TokenProvider
 from .collect import collect
-from .fabric_api import FabricClient, FabricError
+from .fabric_api import FabricClient, FabricError, FabricUnreachable
 from .model import Capacity, parse_fabric_time
 from .rates import Rates
 from .report import analyse, json_out, text
@@ -257,6 +257,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except FabricError as exc:
         print(f"Fabric API error: {exc}", file=sys.stderr)
+        return 2
+    except FabricUnreachable as exc:
+        print(f"Fabric API unreachable: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130

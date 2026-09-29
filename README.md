@@ -156,7 +156,8 @@ vcores_per_cu = 2.0   # override if Microsoft changes a rate before this package
 
 ## Exit codes
 
-`0` healthy · `1` a throttling threshold was crossed · `2` configuration or auth failure.
+`0` healthy · `1` a throttling threshold was crossed · `2` configuration, auth or
+Fabric API failure (including the API staying unreachable after retries).
 Suitable for CI.
 
 If the capacity was resized during the range, "crossed" means the range's load would cross

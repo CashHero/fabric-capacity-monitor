@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A network timeout or dropped connection crashed the report with a traceback. Fabric
+  requests now retry these like a 5xx and, if the API stays unreachable, exit 2 with a
+  one-line error. An outage is never mistaken for an empty workspace, so it can't
+  silently drop CU from the totals. ARM calls, which are optional, now degrade to no
+  data, and a token-endpoint timeout under `--auth env` is reported as an auth failure.
 - A capacity resized during the reporting range was measured against its current SKU for
   the whole range. Resizes are now read from Azure Resource Graph, so each window and each
   day is measured against the SKU in effect at the time. The text summary names the

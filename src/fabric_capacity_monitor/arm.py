@@ -31,9 +31,18 @@ class ArmClient:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._tokens.token(ARM_RESOURCE)}"}
 
+    def _send(self, method: str, url: str, **kwargs: Any) -> requests.Response | None:
+        """The response, or ``None`` if ARM couldn't be reached: it is strictly optional."""
+        try:
+            return getattr(self._session, method)(
+                url, headers=self._headers(), timeout=self._timeout, **kwargs
+            )
+        except requests.RequestException:
+            return None
+
     def _get(self, url: str) -> dict | None:
-        response = self._session.get(url, headers=self._headers(), timeout=self._timeout)
-        return response.json() if response.status_code == 200 else None
+        response = self._send("get", url)
+        return response.json() if response is not None and response.status_code == 200 else None
 
     def subscriptions(self) -> list[dict]:
         payload = self._get(f"{BASE}/subscriptions?api-version=2022-12-01")
@@ -88,13 +97,12 @@ class ArmClient:
             " | project at = tostring(properties.changeAttributes.timestamp),"
             " previous = tostring(sku.previousValue), new = tostring(sku.newValue)"
         )
-        response = self._session.post(
+        response = self._send(
+            "post",
             f"{BASE}/providers/Microsoft.ResourceGraph/resources?api-version={GRAPH_API_VERSION}",
-            headers=self._headers(),
             json={"query": query, "subscriptions": [sub_id]},
-            timeout=self._timeout,
         )
-        if response.status_code != 200:
+        if response is None or response.status_code != 200:
             return []
         changes = [
             SkuChange(at=parse_fabric_time(row["at"]), previous=row["previous"], new=row["new"])
@@ -137,9 +145,9 @@ class ArmClient:
             },
         }
         for attempt in range(3):
-            response = self._session.post(
-                url, headers=self._headers(), json=body, timeout=self._timeout
-            )
+            response = self._send("post", url, json=body)
+            if response is None:
+                return None
             if response.status_code == 200:
                 rows = response.json().get("properties", {}).get("rows", [])
                 out: list[tuple[float, str, str]] = []
