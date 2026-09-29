@@ -134,7 +134,10 @@ def analyse(
 ) -> Analysis:
     operations = [op for op in collection.operations if op.end and start <= op.end <= end]
     base_cu = collection.capacity.base_cu or 0.0
-    windows = build_timeline(operations, start, end, base_cu, rates) if base_cu else []
+    # Background CU from runs that ended before `start` still spreads into the first
+    # 24h of windows; build_timeline clips each spread to the range.
+    smoothed = [op for op in collection.operations if op.end and op.end <= end]
+    windows = build_timeline(smoothed, start, end, base_cu, rates) if base_cu else []
 
     days_map: dict[str, DayRow] = {}
     for operation in operations:
