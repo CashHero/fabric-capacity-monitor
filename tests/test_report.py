@@ -91,7 +91,7 @@ def test_html_is_self_contained(analysis):
     # Opened from disk there is no Content-Type header, so without this browsers
     # fall back to windows-1252 and every "·" renders as "Â·".
     assert page.startswith('<meta charset="utf-8">')
-    assert "<title>" in page
+    assert "<title>Capacity · demo</title>" in page
     assert "<svg" in page
     # No external resources of any kind: the page must render offline.
     for marker in ("http://", "https://", "cdn.", "<script"):

@@ -399,7 +399,7 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
         )
 
     return f"""<meta charset="utf-8">
-<title>Capacity ·{_e(capacity.name)}</title>
+<title>Capacity · {_e(capacity.name)}</title>
 <style>{_CSS}</style>
 <div class="wrap">
 <h1>{_e(capacity.name)}</h1>
