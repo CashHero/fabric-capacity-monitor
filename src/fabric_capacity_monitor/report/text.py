@@ -36,6 +36,27 @@ def _sparkline(values: list[float], width: int = 60) -> str:
     return "".join(out)
 
 
+def _resize_markers(analysis: Analysis, width: int = 60) -> str:
+    """A line to sit under the sparkline with a '^' where each resize happened."""
+    windows = analysis.windows
+    if not analysis.sku_changes or not windows:
+        return ""
+    step = max(len(windows) / width, 1.0)
+    cells = [" "] * min(width, len(windows))
+    for change in analysis.sku_changes:
+        index = int((change.at - windows[0].start).total_seconds() // analysis.rates.window_seconds)
+        bucket = int(index / step)
+        if int((bucket + 1) * step) <= index:  # float rounding: match _sparkline's slicing
+            bucket += 1
+        cells[min(max(bucket, 0), len(cells) - 1)] = "^"
+    line = "".join(cells).rstrip()
+    label = ", ".join(f"{c.previous}→{c.new}" for c in analysis.sku_changes)
+    first = line.index("^")
+    if len(line) + 1 + len(label) > width and first > len(label):
+        return f"{line[: first - len(label) - 1]}{label} {line[first:]}"
+    return f"{line} {label}"
+
+
 def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = False, top: int = 15) -> str:
     capacity = analysis.capacity
     budget = capacity.daily_budget_cu_seconds()
@@ -54,8 +75,18 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
 
     lines.append(f"  Average utilization   {_pct(analysis.average_utilization)}   (active windows only)")
     lines.append(f"  Peak utilization      {_pct(analysis.peak_utilization)}")
+    if analysis.windows:
+        lines.append(
+            f"  Current utilization   {_pct(analysis.windows[-1].utilization)}"
+            f"   (latest window, {capacity.sku or '?'})"
+        )
     if budget:
         lines.append(f"  Daily CU budget       {_num(budget)} CU-s  ({capacity.base_cu:g} CU)")
+    for change in analysis.sku_changes:
+        lines.append(
+            f"  Resized               {change.previous} → {change.new}"
+            f" at {change.at:%Y-%m-%d %H:%M} UTC"
+        )
     lines.append(f"  Total CU consumed     {_num(analysis.total_cu_seconds)} CU-s")
     lines.append(f"  Operations            {analysis.total_operations:,}")
     lines.append(f"  Distinct users        {len(analysis.users)}")
@@ -67,11 +98,27 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
     lines.append(f"    Interactive rejection  {breaches['interactive_rejection']:>6}   (forward 60 min)")
     lines.append(f"    Background rejection   {breaches['background_rejection']:>6}   (forward 24 h)")
     lines.append(f"    Over 100% in-window    {breaches['over_capacity']:>6}")
+    if analysis.sku_changes:
+        crossed = [
+            f"{analysis.current_breaches[key]} {label}"
+            for key, label in (
+                ("interactive_delay", "interactive delay"),
+                ("interactive_rejection", "interactive rejection"),
+                ("background_rejection", "background rejection"),
+            )
+            if analysis.current_breaches[key]
+        ]
+        lines.append(
+            f"    The same load on {capacity.sku} throughout would cross: "
+            f"{', '.join(crossed) or 'none'}"
+        )
     lines.append("")
 
     if analysis.windows:
         lines.append("  Utilization over time (peak per bucket, '!' = over budget)")
         lines.append(f"    {_sparkline([w.utilization for w in analysis.windows])}")
+        if markers := _resize_markers(analysis):
+            lines.append(f"    {markers}")
         lines.append(
             f"    {analysis.start:%m-%d}"
             + " " * 52
@@ -82,7 +129,7 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
     lines.append(f"  {'DATE':<12}{'CU-s':>12}{'UTIL':>8}{'RUNS':>7}{'FAILED':>8}{'QUEUED':>9}")
     lines.append(f"  {'-' * 12}{'-' * 12:>12}{'-' * 7:>8}{'-' * 6:>7}{'-' * 7:>8}{'-' * 8:>9}")
     for day in analysis.days:
-        util = day.utilization(budget)
+        util = day.utilization()
         lines.append(
             f"  {day.date:<12}{_num(day.cu_seconds):>12}{_pct(util):>8}"
             f"{day.operations:>7}{day.failed:>8}{_num(day.queued_seconds) + 's':>9}"
@@ -148,15 +195,18 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
                 lines.append(("    - " if index == 0 else "      ") + chunk)
         lines.append("")
 
-    worst = max(
-        breaches["interactive_delay"],
-        breaches["interactive_rejection"],
-        breaches["background_rejection"],
-    )
-    verdict = "THROTTLING RISK" if worst else "healthy"
+    verdict = "THROTTLING RISK" if analysis.at_risk else "healthy"
     lines.append(_rule())
-    peak = _pct(analysis.peak_utilization).strip()
-    lines.append(f"SUMMARY: {verdict} · peak {peak} of {capacity.sku or '?'}")
+    if analysis.sku_changes:
+        current = _pct(analysis.current_peak_utilization).strip()
+        peak = _pct(analysis.peak_utilization).strip()
+        lines.append(
+            f"SUMMARY: {verdict} on {capacity.sku} · peak {current} of {capacity.sku}"
+            f" ({peak} of {analysis.peak_sku} before resize)"
+        )
+    else:
+        peak = _pct(analysis.peak_utilization).strip()
+        lines.append(f"SUMMARY: {verdict} · peak {peak} of {capacity.sku or '?'}")
     lines.append(_rule())
     return "\n".join(lines)
 

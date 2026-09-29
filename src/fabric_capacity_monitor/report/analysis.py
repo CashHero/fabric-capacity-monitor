@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from ..collect import Collection
-from ..model import Operation, Window
+from ..model import Capacity, Operation, SkuChange, Window, sku_cu
 from ..rates import Rates
 from ..smoothing import build_timeline, throttle_breaches
 
@@ -46,11 +46,12 @@ class DayRow:
     queued_seconds: float = 0.0
     operations: int = 0
     failed: int = 0
+    budget_cu_seconds: float | None = None  # the day's capacity, following any resize
 
-    def utilization(self, daily_budget: float | None) -> float | None:
-        if not daily_budget:
+    def utilization(self) -> float | None:
+        if not self.budget_cu_seconds:
             return None
-        return self.cu_seconds / daily_budget
+        return self.cu_seconds / self.budget_cu_seconds
 
 
 @dataclass
@@ -63,7 +64,11 @@ class Analysis:
     days: list[DayRow]
     items: list[ItemRow]
     workspaces: list[ItemRow]
-    breaches: dict[str, int]
+    breaches: dict[str, int]  # as it happened, against the SKU in effect at the time
+    # The same load against the current SKU throughout: the risk as the capacity stands.
+    # Identical to `breaches` / `peak_utilization` unless the capacity was resized.
+    current_breaches: dict[str, int]
+    current_peak_utilization: float | None
     total_cu_seconds: float
     total_operations: int
     users: set[str]
@@ -94,6 +99,25 @@ class Analysis:
             return None
         return max(self.windows, key=lambda w: w.utilization)
 
+    @property
+    def at_risk(self) -> bool:
+        """Whether this load crosses a throttling threshold on the capacity as sized now."""
+        return any(
+            self.current_breaches[key]
+            for key in ("interactive_delay", "interactive_rejection", "background_rejection")
+        )
+
+    @property
+    def peak_sku(self) -> str | None:
+        """The SKU the peak was measured against, which a resize may since have changed."""
+        peak = self.peak_window
+        return self.capacity.sku_at(peak.start) if peak else self.capacity.sku
+
+    @property
+    def sku_changes(self) -> list[SkuChange]:
+        """Resizes inside the reported range."""
+        return [c for c in self.capacity.sku_changes if self.start <= c.at <= self.end]
+
 
 def _bucket(operations: list[Operation], key) -> dict:
     grouped: dict = defaultdict(list)
@@ -123,6 +147,18 @@ def _rows(grouped: dict, prior: dict[tuple, float]) -> list[ItemRow]:
     return sorted(rows, key=lambda r: -r.cu_seconds)
 
 
+def _budget(capacity: Capacity, lo: datetime, hi: datetime) -> float | None:
+    """CU-seconds the capacity could deliver from ``lo`` to ``hi``, following resizes."""
+    cuts = [lo, *(c.at for c in capacity.sku_changes if lo < c.at < hi), hi]
+    total = 0.0
+    for a, b in zip(cuts, cuts[1:], strict=False):
+        cu = sku_cu(capacity.sku_at(a))
+        if cu is None:
+            return None
+        total += cu * (b - a).total_seconds()
+    return total
+
+
 def analyse(
     collection: Collection,
     rates: Rates,
@@ -133,16 +169,35 @@ def analyse(
     activity_events: list[dict] | None = None,
 ) -> Analysis:
     operations = [op for op in collection.operations if op.end and start <= op.end <= end]
-    base_cu = collection.capacity.base_cu or 0.0
+    capacity = collection.capacity
     # Background CU from runs that ended before `start` still spreads into the first
     # 24h of windows; build_timeline clips each spread to the range.
     smoothed = [op for op in collection.operations if op.end and op.end <= end]
-    windows = build_timeline(smoothed, start, end, base_cu, rates) if base_cu else []
+    windows = (
+        build_timeline(
+            smoothed,
+            start,
+            end,
+            sku_cu(capacity.sku_at(start)) or 0.0,
+            rates,
+            cu_changes=[(c.at, sku_cu(c.new) or 0.0) for c in capacity.sku_changes],
+        )
+        if capacity.base_cu
+        else []
+    )
+    current = windows
+    if capacity.base_cu and any(c.at > start for c in capacity.sku_changes):
+        current = build_timeline(smoothed, start, end, capacity.base_cu, rates)
 
     days_map: dict[str, DayRow] = {}
     for operation in operations:
         key = operation.end.strftime("%Y-%m-%d")
-        row = days_map.setdefault(key, DayRow(date=key))
+        if key not in days_map:
+            midnight = datetime.strptime(key, "%Y-%m-%d").replace(tzinfo=UTC)
+            days_map[key] = DayRow(
+                date=key, budget_cu_seconds=_budget(capacity, midnight, midnight + timedelta(days=1))
+            )
+        row = days_map[key]
         row.cu_seconds += operation.cu_seconds
         row.duration_seconds += operation.duration_seconds
         row.queued_seconds += operation.queued_seconds
@@ -180,6 +235,8 @@ def analyse(
         items=_rows(item_groups, prior_cu),
         workspaces=_rows(ws_groups, ws_prior),
         breaches=throttle_breaches(windows),
+        current_breaches=throttle_breaches(current),
+        current_peak_utilization=max((w.utilization for w in current), default=None),
         total_cu_seconds=sum(op.cu_seconds for op in operations),
         total_operations=len(operations),
         users={op.user for op in operations if op.user},

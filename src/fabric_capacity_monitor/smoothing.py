@@ -49,6 +49,8 @@ def build_timeline(
     end: datetime,
     base_cu: float,
     rates: Rates,
+    *,
+    cu_changes: list[tuple[datetime, float]] = (),
 ) -> list[Window]:
     """Spread ``operations`` across smoothing windows spanning ``start`` to ``end``.
 
@@ -56,6 +58,9 @@ def build_timeline(
     interactive CU lands wholly in the window the operation completed in. The spread
     uses a difference array so cost stays linear in the number of windows rather than
     windows-times-operations.
+
+    ``base_cu`` is the capacity size at ``start``; each ``(moment, cu)`` in
+    ``cu_changes`` resizes it from the window containing ``moment`` onward.
     """
     window_seconds = rates.window_seconds
     origin = floor_window(start, window_seconds)
@@ -64,7 +69,13 @@ def build_timeline(
     if count <= 0:
         return []
 
-    budget = base_cu * window_seconds  # CU-seconds available per window
+    # CU-seconds available per window, following any resizes.
+    budgets = [base_cu * window_seconds] * count
+    for moment, cu in sorted(cu_changes):
+        index = int((floor_window(moment, window_seconds) - origin).total_seconds() // window_seconds)
+        index = max(index, 0)
+        budgets[index:] = [cu * window_seconds] * (count - index)
+
     background_delta = [0.0] * (count + 1)
     interactive = [0.0] * count
 
@@ -99,7 +110,7 @@ def build_timeline(
         background[index] = running
 
     totals = [background[i] + interactive[i] for i in range(count)]
-    utilization = [(totals[i] / budget) if budget else 0.0 for i in range(count)]
+    utilization = [(totals[i] / budgets[i]) if budgets[i] else 0.0 for i in range(count)]
 
     delay = _forward_means(utilization, rates.interactive_delay_windows)
     reject = _forward_means(utilization, rates.interactive_reject_windows)
@@ -109,6 +120,7 @@ def build_timeline(
     carry = 0.0
     for index in range(count):
         used = totals[index]
+        budget = budgets[index]
         add = max(used - budget, 0.0)
         burndown = 0.0
         if add:
@@ -129,6 +141,7 @@ def build_timeline(
                 interactive_delay=delay[index],
                 interactive_reject=reject[index],
                 background_reject=background_reject[index],
+                budget_cu_seconds=budget,
             )
         )
     return windows

@@ -28,6 +28,7 @@ def render(analysis: Analysis, *, include_windows: bool = True) -> str:
             "state": capacity.state,
             "base_cu": capacity.base_cu,
             "daily_budget_cu_seconds": capacity.daily_budget_cu_seconds(),
+            "sku_changes": [asdict(change) for change in capacity.sku_changes],
             "workspaces": [w.get("displayName") for w in capacity.workspaces],
         },
         "range": {
@@ -48,6 +49,10 @@ def render(analysis: Analysis, *, include_windows: bool = True) -> str:
             "total_operations": analysis.total_operations,
             "distinct_users": len(analysis.users),
             "throttle_breaches": analysis.breaches,
+            # The same load against the current SKU throughout; drives the exit code.
+            "current_sku_peak_utilization": analysis.current_peak_utilization,
+            "current_sku_throttle_breaches": analysis.current_breaches,
+            "at_risk": analysis.at_risk,
         },
         "days": [asdict(day) for day in analysis.days],
         "items": [

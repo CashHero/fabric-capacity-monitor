@@ -1,4 +1,4 @@
-"""Azure Resource Manager reads: capacity SKU and state, pause/resume history, cost.
+"""Azure Resource Manager reads: capacity SKU and state, SKU/pause/resume history, cost.
 
 Fabric capacities are ordinary ARM resources, which is the only place the SKU and the
 paused/active state are authoritative. Note that Azure Monitor exposes *no* platform
@@ -14,10 +14,12 @@ from typing import Any
 import requests
 
 from .auth import ARM_RESOURCE, TokenProvider
+from .model import SkuChange, parse_fabric_time
 
 BASE = "https://management.azure.com"
 FABRIC_API_VERSION = "2023-11-01"
 COST_API_VERSION = "2023-11-01"
+GRAPH_API_VERSION = "2022-10-01"
 
 
 class ArmClient:
@@ -68,6 +70,38 @@ class ArmClient:
         )
         payload = self._get(url)
         return payload.get("value", []) if payload else []
+
+    def sku_changes(self, resource_id: str) -> list[SkuChange]:
+        """Resizes of a capacity, oldest first, from Azure Resource Graph change history.
+
+        The activity log records *that* a capacity was written but not the SKU before or
+        after; Resource Graph's ``resourcechanges`` does, for the last 14 days.
+        """
+        sub_id = resource_id.split("/")[2] if resource_id.count("/") > 2 else None
+        if not sub_id:
+            return []
+        query = (
+            "resourcechanges"
+            f" | where tostring(properties.targetResourceId) =~ '{resource_id}'"
+            " | extend sku = properties.changes['sku.name']"
+            " | where isnotnull(sku)"
+            " | project at = tostring(properties.changeAttributes.timestamp),"
+            " previous = tostring(sku.previousValue), new = tostring(sku.newValue)"
+        )
+        response = self._session.post(
+            f"{BASE}/providers/Microsoft.ResourceGraph/resources?api-version={GRAPH_API_VERSION}",
+            headers=self._headers(),
+            json={"query": query, "subscriptions": [sub_id]},
+            timeout=self._timeout,
+        )
+        if response.status_code != 200:
+            return []
+        changes = [
+            SkuChange(at=parse_fabric_time(row["at"]), previous=row["previous"], new=row["new"])
+            for row in response.json().get("data", [])
+            if row.get("at") and row.get("previous") and row.get("new")
+        ]
+        return sorted(changes, key=lambda change: change.at)
 
     def cost_by_meter(
         self, subscription_id: str, start_iso: str, end_iso: str
