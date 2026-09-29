@@ -56,6 +56,11 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
     lines.append(f"  Peak utilization      {_pct(analysis.peak_utilization)}")
     if budget:
         lines.append(f"  Daily CU budget       {_num(budget)} CU-s  ({capacity.base_cu:g} CU)")
+    for change in analysis.sku_changes:
+        lines.append(
+            f"  Resized               {change.previous} → {change.new}"
+            f" at {change.at:%Y-%m-%d %H:%M} UTC"
+        )
     lines.append(f"  Total CU consumed     {_num(analysis.total_cu_seconds)} CU-s")
     lines.append(f"  Operations            {analysis.total_operations:,}")
     lines.append(f"  Distinct users        {len(analysis.users)}")
@@ -82,7 +87,7 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
     lines.append(f"  {'DATE':<12}{'CU-s':>12}{'UTIL':>8}{'RUNS':>7}{'FAILED':>8}{'QUEUED':>9}")
     lines.append(f"  {'-' * 12}{'-' * 12:>12}{'-' * 7:>8}{'-' * 6:>7}{'-' * 7:>8}{'-' * 8:>9}")
     for day in analysis.days:
-        util = day.utilization(budget)
+        util = day.utilization()
         lines.append(
             f"  {day.date:<12}{_num(day.cu_seconds):>12}{_pct(util):>8}"
             f"{day.operations:>7}{day.failed:>8}{_num(day.queued_seconds) + 's':>9}"
@@ -156,7 +161,7 @@ def render(analysis: Analysis, *, by_item: bool = False, by_workspace: bool = Fa
     verdict = "THROTTLING RISK" if worst else "healthy"
     lines.append(_rule())
     peak = _pct(analysis.peak_utilization).strip()
-    lines.append(f"SUMMARY: {verdict} · peak {peak} of {capacity.sku or '?'}")
+    lines.append(f"SUMMARY: {verdict} · peak {peak} of {analysis.peak_sku or '?'}")
     lines.append(_rule())
     return "\n".join(lines)
 

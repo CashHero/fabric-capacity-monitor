@@ -21,12 +21,13 @@ from .arm import ArmClient
 from .auth import AuthError, TokenProvider
 from .collect import collect
 from .fabric_api import FabricClient, FabricError
-from .model import Capacity
+from .model import Capacity, parse_fabric_time
 from .rates import Rates
 from .report import analyse, json_out, text
 from .report import html as html_report
 
 MAX_DAYS = 30  # the Livy session API retains roughly this much history
+SKU_HISTORY_DAYS = 14  # Azure Resource Graph keeps resource changes this long
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -195,6 +196,24 @@ def cmd_report(args: argparse.Namespace, fabric: FabricClient, arm: ArmClient, r
     events = []
     if capacity.resource_id:
         events = arm.activity_log(capacity.resource_id, start.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        capacity.sku_changes = arm.sku_changes(capacity.resource_id)
+        # The activity log keeps 90 days but Resource Graph only 14, so an older write
+        # may have been a resize we can't see.
+        horizon = end - timedelta(days=SKU_HISTORY_DAYS)
+        old_writes = [
+            e["eventTimestamp"][:10]
+            for e in events
+            if (e.get("operationName") or {}).get("value", "").lower()
+            == "microsoft.fabric/capacities/write"
+            and (e.get("status") or {}).get("value") == "Succeeded"
+            and parse_fabric_time(e.get("eventTimestamp")) < horizon
+        ]
+        if old_writes:
+            collection.warnings.append(
+                f"The capacity was modified on {', '.join(sorted(set(old_writes)))}, beyond "
+                f"the {SKU_HISTORY_DAYS} days of SKU history Azure keeps. If it was resized "
+                f"then, utilization before that date is measured against the wrong SKU."
+            )
 
     analysis = analyse(
         collection, rates, start, end, cost_rows=cost_rows, activity_events=events

@@ -83,25 +83,47 @@ class Operation:
         return self.status.lower() in {"cancelled", "canceled", "stopped"}
 
 
+def sku_cu(sku: str | None) -> float | None:
+    """Base capacity units implied by a SKU name, e.g. ``F4`` -> 4.0."""
+    if not sku:
+        return None
+    digits = "".join(c for c in sku if c.isdigit())
+    return float(digits) if digits else None
+
+
+@dataclass
+class SkuChange:
+    """One resize of a capacity, as recorded by Azure Resource Graph."""
+
+    at: datetime
+    previous: str
+    new: str
+
+
 @dataclass
 class Capacity:
     """A Fabric capacity and the workspaces assigned to it."""
 
     id: str
     name: str
-    sku: str | None = None
+    sku: str | None = None  # current SKU
     region: str | None = None
     state: str | None = None
     resource_id: str | None = None
     workspaces: list[dict] = field(default_factory=list)
+    sku_changes: list[SkuChange] = field(default_factory=list)  # oldest first
 
     @property
     def base_cu(self) -> float | None:
-        """Base capacity units implied by the SKU, e.g. ``F4`` -> 4.0."""
-        if not self.sku:
-            return None
-        digits = "".join(c for c in self.sku if c.isdigit())
-        return float(digits) if digits else None
+        """Base capacity units implied by the current SKU, e.g. ``F4`` -> 4.0."""
+        return sku_cu(self.sku)
+
+    def sku_at(self, moment: datetime) -> str | None:
+        """The SKU in effect at ``moment``: what the first later resize changed *from*."""
+        for change in self.sku_changes:
+            if change.at > moment:
+                return change.previous
+        return self.sku
 
     def daily_budget_cu_seconds(self) -> float | None:
         base = self.base_cu
@@ -123,6 +145,7 @@ class Window:
     interactive_delay: float = 0.0  # forward 10-minute mean utilization
     interactive_reject: float = 0.0  # forward 60-minute mean utilization
     background_reject: float = 0.0  # forward 24-hour mean utilization
+    budget_cu_seconds: float = 0.0  # what the SKU in effect could deliver in this window
 
     @property
     def end(self) -> datetime:

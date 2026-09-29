@@ -28,6 +28,7 @@ def render(analysis: Analysis, *, include_windows: bool = True) -> str:
             "state": capacity.state,
             "base_cu": capacity.base_cu,
             "daily_budget_cu_seconds": capacity.daily_budget_cu_seconds(),
+            "sku_changes": [asdict(change) for change in capacity.sku_changes],
             "workspaces": [w.get("displayName") for w in capacity.workspaces],
         },
         "range": {

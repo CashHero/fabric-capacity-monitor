@@ -35,8 +35,12 @@ role, no Power BI licence.
 | `env` | `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` |
 
 ARM permissions (`Reader` on the capacity's subscription) are optional but recommended:
-without them you lose the SKU, region, paused/resumed history and cost, and the CU budget
-has to be supplied via config.
+without them you lose the SKU, region, resize and paused/resumed history and cost, and the
+CU budget has to be supplied via config.
+
+Resizes come from Azure Resource Graph change history, which keeps 14 days. Utilization
+is measured against the SKU in effect at each moment. If the activity log shows an older
+write to the capacity, the report notes that the SKU before it can't be confirmed.
 
 ## How CU is calculated
 

@@ -113,13 +113,12 @@ def _multi_line(series: list[tuple[str, list[float], str]], title: str) -> str:
 
 
 def _daily_bars(analysis: Analysis) -> str:
-    budget = analysis.capacity.daily_budget_cu_seconds()
-    if not analysis.days or not budget:
+    if not analysis.days or not analysis.capacity.base_cu:
         return ""
     rows = []
     peak = max((d.cu_seconds for d in analysis.days), default=1.0) or 1.0
     for day in analysis.days:
-        util = day.cu_seconds / budget
+        util = day.utilization() or 0.0
         width = day.cu_seconds / peak * 100
         css = "bar over" if util > 1.0 else "bar"
         rows.append(
@@ -233,7 +232,7 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
     utilization = [w.utilization for w in analysis.windows]
 
     cards = [
-        ("SKU", capacity.sku or "—", ""),
+        ("SKU", " → ".join([c.previous for c in analysis.sku_changes] + [capacity.sku or "—"]), ""),
         ("Average utilization", _pct(analysis.average_utilization), ""),
         (
             "Peak utilization",
@@ -313,7 +312,7 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
 
 <h2>Overage carryforward</h2>
 {_area_chart(
-    [w.carry_cumulative / (capacity.base_cu * 30) if capacity.base_cu else 0.0 for w in analysis.windows],
+    [w.carry_cumulative / w.budget_cu_seconds if w.budget_cu_seconds else 0.0 for w in analysis.windows],
     threshold=1.0,
     title="Cumulative carryforward, as a multiple of one window's CU budget",
 )}

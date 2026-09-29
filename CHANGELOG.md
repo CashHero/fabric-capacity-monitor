@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A capacity resized during the reporting range was measured against its current SKU for
+  the whole range. Resizes are now read from Azure Resource Graph, so each window and each
+  day is measured against the SKU in effect at the time. The text summary names the
+  resize, and the dashboard's SKU card shows it (e.g. `F4 → F8`).
 - The utilization timeline now includes background CU carried in from runs that ended
   up to 24 hours before the reporting range. Previously the first day of every report
   started from zero, understating early utilization, peaks and the average.

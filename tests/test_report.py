@@ -6,7 +6,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from fabric_capacity_monitor.collect import Collection
-from fabric_capacity_monitor.model import BACKGROUND, ESTIMATED, EXACT, Capacity, Operation
+from fabric_capacity_monitor.model import (
+    BACKGROUND,
+    ESTIMATED,
+    EXACT,
+    Capacity,
+    Operation,
+    SkuChange,
+)
 from fabric_capacity_monitor.report import analyse, json_out
 from fabric_capacity_monitor.report import html as html_report
 from fabric_capacity_monitor.report import text as text_report
@@ -129,3 +136,39 @@ def test_timeline_includes_carry_in_from_before_the_range(rates):
     assert analysis.windows[1440].background_cu_seconds == pytest.approx(0.0)
     assert analysis.total_cu_seconds == 0
     assert analysis.days == []
+
+
+def _resized_capacity():
+    # Was F4 until noon on day one, F8 since.
+    return Capacity(
+        id="c", name="demo", sku="F8", workspaces=[{"id": "w", "displayName": "analytics"}],
+        sku_changes=[SkuChange(at=START + timedelta(hours=12), previous="F4", new="F8")],
+    )
+
+
+def test_sku_at_follows_resizes():
+    capacity = _resized_capacity()
+    assert capacity.sku_at(START) == "F4"
+    assert capacity.sku_at(START + timedelta(hours=12)) == "F8"
+    assert capacity.sku_at(END) == "F8"
+
+
+def test_a_resize_is_not_applied_to_the_time_before_it(rates):
+    collection = Collection(capacity=_resized_capacity())
+    collection.operations = [_op("ingest", 100_000.0, START + timedelta(hours=1))]
+    analysis = analyse(collection, rates, START, END)
+
+    before = next(w for w in analysis.windows if w.start == START + timedelta(hours=6))
+    after = next(w for w in analysis.windows if w.start == START + timedelta(hours=18))
+    # The same smoothed CU is twice the share of an F4 as of an F8.
+    assert before.cu_seconds == pytest.approx(after.cu_seconds)
+    assert before.utilization == pytest.approx(2 * after.utilization)
+    assert analysis.peak_sku == "F4"
+
+    # Day one had 12 h of F4 and 12 h of F8.
+    assert analysis.days[0].budget_cu_seconds == pytest.approx((4 + 8) * 43_200)
+
+    out = text_report.render(analysis)
+    assert "Resized               F4 → F8 at 2026-09-01 12:00 UTC" in out
+    assert "peak" in out and "of F4" in out.splitlines()[-2]
+    assert "F4 → F8" in html_report.render(analysis)

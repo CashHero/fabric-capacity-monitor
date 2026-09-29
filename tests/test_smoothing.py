@@ -124,3 +124,19 @@ def test_operations_without_an_end_time_are_ignored(rates):
     op = make_op(START, 100.0)
     op.end = None
     assert build_timeline([op], START, START + timedelta(hours=1), 4.0, rates)[0].cu_seconds == 0
+
+
+def test_resize_changes_the_budget_from_the_window_it_happens_in(rates):
+    # F4 fully loaded all day; resizing to F8 at noon halves utilization from then on.
+    op = make_op(START, 120.0 * rates.background_windows)
+    resize = START + timedelta(hours=12, seconds=10)
+    windows = build_timeline(
+        [op], START, START + timedelta(days=1), base_cu=4.0, rates=rates,
+        cu_changes=[(resize, 8.0)],
+    )
+    index = next(i for i, w in enumerate(windows) if w.start > resize) - 1
+    assert windows[index - 1].utilization == pytest.approx(1.0)
+    assert windows[index - 1].budget_cu_seconds == pytest.approx(120.0)
+    assert windows[index].utilization == pytest.approx(0.5)
+    assert windows[index].budget_cu_seconds == pytest.approx(240.0)
+    assert windows[-2].utilization == pytest.approx(0.5)
