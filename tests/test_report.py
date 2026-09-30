@@ -1,6 +1,7 @@
 """Renderers: they must run, and must not overstate what they know."""
 
 import json
+import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -359,3 +360,23 @@ def test_outlook_that_never_reaches_the_target_still_renders(rates):
     assert "still above the target after 24 h" in text_report.render(analysis)
     assert "not within 24 h" in html_report.render(analysis)
     assert json.loads(json_out.render(analysis))["outlook"]["recovery_at"] is None
+
+
+def _x_labels(svg):
+    return re.findall(r'class="xlab">([^<]+)<', svg)
+
+
+def test_charts_label_the_time_axis_in_utc(analysis):
+    day = html_report._area_chart([0.5] * 2880, span=(START, START + timedelta(hours=24)))
+    assert 1 < len(_x_labels(day)) <= 8
+    assert _x_labels(day)[0] == "Sep 01"  # midnight gets the date, not "00:00"
+    assert "06:00" in _x_labels(day)
+
+    fortnight = html_report._area_chart(
+        [0.5] * 40320, span=(START, START + timedelta(days=14))
+    )
+    assert 1 < len(_x_labels(fortnight)) <= 8
+    assert all(re.fullmatch(r"Sep \d\d", label) for label in _x_labels(fortnight))
+
+    assert 'class="xlab"' not in html_report._area_chart([0.5] * 10)
+    assert 'class="xlab"' in html_report.render(analysis)

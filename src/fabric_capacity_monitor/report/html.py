@@ -7,7 +7,7 @@ around without anyone needing a Power BI licence.
 from __future__ import annotations
 
 import html
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from .analysis import Analysis
 
@@ -47,12 +47,49 @@ def _downsample(values: list[float], buckets: int) -> list[float]:
     ]
 
 
+_TICK_STEPS = [timedelta(hours=h) for h in (1, 2, 3, 6, 12, 24, 48, 168)]
+
+
+def _time_axis(start: datetime, end: datetime, plotted: int, height: float) -> str:
+    """UTC ticks along the bottom; windows are contiguous, so time is linear in x."""
+    if end <= start or plotted < 2:
+        return ""
+    span = (end - start).total_seconds()
+    for step in _TICK_STEPS:
+        seconds = step.total_seconds()
+        first = -(-start.timestamp() // seconds) * seconds  # epoch-aligned, so midnight UTC
+        ticks = [
+            datetime.fromtimestamp(first + k * seconds, UTC)
+            for k in range(int((end.timestamp() - first) // seconds) + 1)
+        ]
+        if len(ticks) <= 8:
+            break
+    parts = []
+    for tick in ticks:
+        x = _PAD_L + (tick - start).total_seconds() / span * (plotted - 1)
+        if x > _CHART_W - 18:  # a centred label here would be clipped by the viewBox
+            continue
+        daily = step >= timedelta(days=1) or (tick.hour == 0 and tick.minute == 0)
+        label = f"{tick:%b %d}" if daily else f"{tick:%H:%M}"
+        parts.append(
+            f'<line x1="{x:.1f}" y1="0" x2="{x:.1f}" y2="{height}" class="grid"/>'
+            f'<text x="{x:.1f}" y="{height + 16}" class="xlab">{_e(label)}</text>'
+        )
+    return "".join(parts)
+
+
 def _area_chart(
-    values: list[float], *, threshold: float = 1.0, target: float | None = None, title: str = ""
+    values: list[float],
+    *,
+    threshold: float = 1.0,
+    target: float | None = None,
+    title: str = "",
+    span: tuple[datetime, datetime] | None = None,
 ) -> str:
     """Filled area chart scaled so the 100% threshold always sits on the grid.
 
     ``target``, if given, is drawn as a second, labelled line that is not a throttle.
+    ``span``, the first and last window start, adds a UTC time axis.
     """
     points = _downsample(values, _CHART_W - _PAD_L)
     if not points:
@@ -91,6 +128,7 @@ def _area_chart(
         f'<svg viewBox="0 0 {_CHART_W} {_CHART_H}" role="img" aria-label="{_e(title)}">'
         + "".join(over)
         + "".join(grid)
+        + (_time_axis(*span, len(points), height) if span else "")
         + f'<line x1="{_PAD_L}" y1="{y(threshold):.1f}" x2="{_CHART_W}" '
         + f'y2="{y(threshold):.1f}" class="limit"/>'
         + f'<polygon points="{area}" class="area"/>'
@@ -99,7 +137,11 @@ def _area_chart(
     )
 
 
-def _multi_line(series: list[tuple[str, list[float], str]], title: str) -> str:
+def _multi_line(
+    series: list[tuple[str, list[float], str]],
+    title: str,
+    span: tuple[datetime, datetime] | None = None,
+) -> str:
     """Overlaid line chart for the three throttling horizons."""
     prepared = [(label, _downsample(values, _CHART_W - _PAD_L), css) for label, values, css in series]
     prepared = [item for item in prepared if item[1]]
@@ -123,6 +165,7 @@ def _multi_line(series: list[tuple[str, list[float], str]], title: str) -> str:
         + f'<line x1="{_PAD_L}" y1="{y(1.0):.1f}" x2="{_CHART_W}" '
         + f'y2="{y(1.0):.1f}" class="limit"/>'
         + f'<text x="{_PAD_L - 8}" y="{y(1.0) + 4:.1f}" class="ylab">100%</text>'
+        + (_time_axis(*span, len(prepared[0][1]), height) if span else "")
         + "".join(paths)
         + "</svg>"
         + f'<div class="legend">{" &nbsp; ".join(legend)}</div></figure>'
@@ -208,6 +251,7 @@ def _outlook(analysis: Analysis) -> str:
     chart = _area_chart(
         [w.utilization for w in analysis.outlook],
         target=analysis.target,
+        span=(analysis.outlook[0].start, analysis.outlook[-1].start),
         title=f"Projected utilization of {sku} over the next 24 h if nothing new runs; "
         f"red dashed line = 100%, where throttling starts; grey dashed line = {target} target",
     )
@@ -296,6 +340,7 @@ figcaption{color:var(--muted);font-size:12px;margin-bottom:6px}
 svg{width:100%;height:auto;min-width:640px;display:block}
 .grid{stroke:var(--line);stroke-width:1}
 .ylab{fill:var(--muted);font-size:10px;text-anchor:end}
+.xlab{fill:var(--muted);font-size:10px;text-anchor:middle}
 .limit{stroke:var(--bad);stroke-width:1.2;stroke-dasharray:4 3}
 .area{fill:var(--accent-soft)}
 .line{fill:none;stroke:var(--accent);stroke-width:1.3}
@@ -333,6 +378,7 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
         breaches[k] for k in ("interactive_delay", "interactive_rejection", "background_rejection")
     )
     utilization = [w.utilization for w in analysis.windows]
+    span = (analysis.windows[0].start, analysis.windows[-1].start) if analysis.windows else None
 
     cards = [
         ("SKU", " → ".join([c.previous for c in analysis.sku_changes] + [capacity.sku or "—"]), ""),
@@ -411,20 +457,22 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
 <div class="cards">{card_html}</div>
 
 <h2>Capacity utilization</h2>
-{_area_chart(utilization, title=_UTILIZATION_CAPTION)}
+{_area_chart(utilization, title=_UTILIZATION_CAPTION, span=span)}
 
 <h2>Throttling</h2>
 {_multi_line([
     ("Interactive delay (10 min)", [w.interactive_delay for w in analysis.windows], "delay"),
     ("Interactive rejection (60 min)", [w.interactive_reject for w in analysis.windows], "reject"),
     ("Background rejection (24 h)", [w.background_reject for w in analysis.windows], "bg"),
-], "Forward-window mean utilization. Crossing 100% starts the matching throttle.")}
+], "Forward-window mean utilization. Crossing 100% starts the matching throttle. "
+   "Times in UTC.", span)}
 
 <h2>Overage carryforward</h2>
 {_area_chart(
     [w.carry_cumulative / w.budget_cu_seconds if w.budget_cu_seconds else 0.0 for w in analysis.windows],
     threshold=1.0,
     title="Cumulative carryforward, as a multiple of one window's CU budget",
+    span=span,
 )}
 
 <h2>Outlook</h2>
