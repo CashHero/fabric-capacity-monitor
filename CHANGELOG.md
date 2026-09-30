@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The HTML dashboard's charts now have a time axis (UTC).
+
 ## [0.2.0] - 2026-09-29
 
 ### Added
