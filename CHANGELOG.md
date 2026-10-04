@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The HTML dashboard's charts now have a time axis (UTC).
+- The HTML dashboard's charts mark each SKU resize with a labelled line.
 
 ## [0.2.0] - 2026-09-29
 

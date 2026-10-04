@@ -7,8 +7,10 @@ around without anyone needing a Power BI licence.
 from __future__ import annotations
 
 import html
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
+from ..model import SkuChange
 from .analysis import Analysis
 
 _CHART_W = 1160
@@ -78,6 +80,28 @@ def _time_axis(start: datetime, end: datetime, plotted: int, height: float) -> s
     return "".join(parts)
 
 
+def _resize_markers(
+    changes: Sequence[SkuChange], start: datetime, end: datetime, plotted: int, height: float
+) -> str:
+    """A labelled dashed line at each resize, on the same scale as ``_time_axis``."""
+    if end <= start or plotted < 2:
+        return ""
+    span = (end - start).total_seconds()
+    parts = []
+    for change in changes:
+        x = _PAD_L + (change.at - start).total_seconds() / span * (plotted - 1)
+        label = f"{change.previous}→{change.new}"
+        if x + 4 + len(label) * 6 > _CHART_W:  # would be clipped: put it left of the line
+            css, label_x = "rlab end", x - 4
+        else:
+            css, label_x = "rlab", x + 4
+        parts.append(
+            f'<line x1="{x:.1f}" y1="0" x2="{x:.1f}" y2="{height}" class="resize"/>'
+            f'<text x="{label_x:.1f}" y="12" class="{css}">{_e(label)}</text>'
+        )
+    return "".join(parts)
+
+
 def _area_chart(
     values: list[float],
     *,
@@ -85,11 +109,13 @@ def _area_chart(
     target: float | None = None,
     title: str = "",
     span: tuple[datetime, datetime] | None = None,
+    resizes: Sequence[SkuChange] = (),
 ) -> str:
     """Filled area chart scaled so the 100% threshold always sits on the grid.
 
     ``target``, if given, is drawn as a second, labelled line that is not a throttle.
-    ``span``, the first and last window start, adds a UTC time axis.
+    ``span``, the first and last window start, adds a UTC time axis and lets ``resizes``
+    be marked.
     """
     points = _downsample(values, _CHART_W - _PAD_L)
     if not points:
@@ -133,6 +159,7 @@ def _area_chart(
         + f'y2="{y(threshold):.1f}" class="limit"/>'
         + f'<polygon points="{area}" class="area"/>'
         + f'<polyline points="{coords}" class="line"/>'
+        + (_resize_markers(resizes, *span, len(points), height) if span else "")
         + "</svg></figure>"
     )
 
@@ -141,6 +168,7 @@ def _multi_line(
     series: list[tuple[str, list[float], str]],
     title: str,
     span: tuple[datetime, datetime] | None = None,
+    resizes: Sequence[SkuChange] = (),
 ) -> str:
     """Overlaid line chart for the three throttling horizons."""
     prepared = [(label, _downsample(values, _CHART_W - _PAD_L), css) for label, values, css in series]
@@ -167,6 +195,7 @@ def _multi_line(
         + f'<text x="{_PAD_L - 8}" y="{y(1.0) + 4:.1f}" class="ylab">100%</text>'
         + (_time_axis(*span, len(prepared[0][1]), height) if span else "")
         + "".join(paths)
+        + (_resize_markers(resizes, *span, len(prepared[0][1]), height) if span else "")
         + "</svg>"
         + f'<div class="legend">{" &nbsp; ".join(legend)}</div></figure>'
     )
@@ -347,6 +376,8 @@ svg{width:100%;height:auto;min-width:640px;display:block}
 .line.delay{stroke:var(--warn)}.line.reject{stroke:var(--bad)}.line.bg{stroke:var(--accent)}
 .over{fill:var(--bad);opacity:.14}
 .target{stroke:var(--muted);stroke-width:1.2;stroke-dasharray:4 3}
+.resize{stroke:var(--ink);stroke-width:1;stroke-dasharray:2 3;opacity:.55}
+.rlab{fill:var(--ink);font-size:10px}.rlab.end{text-anchor:end}
 .legend{font-size:12px;color:var(--muted);padding:4px 0 8px}
 .key{margin-right:4px}.key.delay{color:var(--warn)}
 .key.reject{color:var(--bad)}.key.bg{color:var(--accent)}
@@ -457,7 +488,7 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
 <div class="cards">{card_html}</div>
 
 <h2>Capacity utilization</h2>
-{_area_chart(utilization, title=_UTILIZATION_CAPTION, span=span)}
+{_area_chart(utilization, title=_UTILIZATION_CAPTION, span=span, resizes=analysis.sku_changes)}
 
 <h2>Throttling</h2>
 {_multi_line([
@@ -465,7 +496,7 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
     ("Interactive rejection (60 min)", [w.interactive_reject for w in analysis.windows], "reject"),
     ("Background rejection (24 h)", [w.background_reject for w in analysis.windows], "bg"),
 ], "Forward-window mean utilization. Crossing 100% starts the matching throttle. "
-   "Times in UTC.", span)}
+   "Times in UTC.", span, analysis.sku_changes)}
 
 <h2>Overage carryforward</h2>
 {_area_chart(
@@ -473,6 +504,7 @@ def render(analysis: Analysis, *, top: int = 25) -> str:
     threshold=1.0,
     title="Cumulative carryforward, as a multiple of one window's CU budget",
     span=span,
+    resizes=analysis.sku_changes,
 )}
 
 <h2>Outlook</h2>

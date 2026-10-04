@@ -380,3 +380,30 @@ def test_charts_label_the_time_axis_in_utc(analysis):
 
     assert 'class="xlab"' not in html_report._area_chart([0.5] * 10)
     assert 'class="xlab"' in html_report.render(analysis)
+
+
+def _resize_lines(svg):
+    return [float(x) for x in re.findall(r'<line x1="([\d.]+)"[^>]*class="resize"', svg)]
+
+
+def test_charts_mark_each_resize(rates):
+    collection = Collection(capacity=_resized_capacity())
+    collection.operations = [_op("ingest", 1000.0, START)]
+    analysis = analyse(collection, rates, START, END)
+    out = html_report.render(analysis)
+
+    # Utilization, throttling and carryforward; the outlook is all after the resize.
+    lines = _resize_lines(out)
+    assert len(lines) == 3
+    assert re.findall(r'class="rlab">([^<]+)<', out) == ["F4→F8"] * 3
+    # A quarter of the way through the range, on the same scale as the time axis.
+    first, last = analysis.windows[0].start, analysis.windows[-1].start
+    plotted = html_report._CHART_W - html_report._PAD_L
+    expected = html_report._PAD_L + (12 * 3600) / (last - first).total_seconds() * (plotted - 1)
+    assert lines == pytest.approx([expected] * 3, abs=0.1)
+
+    analysis.capacity.sku_changes[0].at = END - timedelta(minutes=30)
+    assert 'class="rlab end"' in html_report.render(analysis)  # would clip at the right edge
+
+    analysis.capacity.sku_changes.clear()
+    assert 'class="resize"' not in html_report.render(analysis)
